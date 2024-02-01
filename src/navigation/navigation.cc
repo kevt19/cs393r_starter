@@ -114,6 +114,10 @@ void Navigation::ObservePointCloud(const vector<Vector2f>& cloud,
   point_cloud_ = cloud;                                     
 }
 
+float Navigation::ComputeDistanceToGoal(const Vector2f& loc) {
+  return (loc - nav_goal_loc_).norm();
+}
+
 void Navigation::Run() {
   // This function gets called 20 times a second to form the control loop.
   
