@@ -52,6 +52,9 @@ VisualizationMsg global_viz_msg_;
 AckermannCurvatureDriveMsg drive_msg_;
 // Epsilon value for handling limited numerical precision.
 const float kEpsilon = 1e-5;
+const float w_clearance = 0.5;
+const float w_distance_to_goal = -0.5;
+const float w_free_path_length = 0.5;
 } //namespace
 
 namespace navigation {
@@ -126,9 +129,15 @@ void Navigation::ObservePointCloud(const vector<Vector2f>& cloud,
   point_cloud_ = cloud;                                     
 }
 
+float Navigation::ComputeScore(float free_path_length, float clearance, float distance_to_goal) {
+  return w_free_path_length * free_path_length + w_clearance * clearance + w_distance_to_goal * distance_to_goal;
+}
+
+
 float Navigation::ComputeDistanceToGoal(const Vector2f& loc) {
   return (loc - nav_goal_loc_).norm();
 }
+
 
 void Navigation::Run() {
   // This function gets called 20 times a second to form the control loop.
