@@ -62,6 +62,9 @@ class Navigation {
   void ObservePointCloud(const std::vector<Eigen::Vector2f>& cloud,
                          double time);
 
+  // Move forward a specified distance 
+  double MoveForward(double free_path_l);
+
   // Main function called continously from main
   void Run();
   // Used to set the next target pose.

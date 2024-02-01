@@ -35,6 +35,10 @@
 #include "visualization/visualization.h"
 #include <iostream>
 
+#define MAX_ACCEL 4.0
+#define MAX_SPEED 1.0
+#define CTRL_FREQ 20.0
+
 using Eigen::Vector2f;
 using amrl_msgs::AckermannCurvatureDriveMsg;
 using amrl_msgs::VisualizationMsg;
@@ -114,6 +118,55 @@ void Navigation::ObservePointCloud(const vector<Vector2f>& cloud,
   point_cloud_ = cloud;                                     
 }
 
+double Navigation::MoveForward(double free_path_l){
+  double speed = robot_vel_.norm();
+  double speed_after_accel = speed + (MAX_ACCEL / CTRL_FREQ);
+
+  // Dist that would be covered before coming to a stop if brakes are maximally applied, starting at some initial speed
+  auto brake_dist = [](double initial_speed){
+    return ((initial_speed * initial_speed) / (2 * MAX_ACCEL));
+  };
+
+  // Distance that would be covered by accelerating for one time step then slamming on the brakes until a stop is reached
+  double accel_dist = (0.5 * (speed + speed_after_accel) * (1 / CTRL_FREQ)) + brake_dist(speed_after_accel);
+
+  // Distance that would be covered by cruising for one time step
+  double cruise_dist = (speed / CTRL_FREQ) + brake_dist(speed);
+
+  // Acceleration that would be required to come to a full stop right as free path length hits zero
+  double brake_accel = (speed * speed) / (2 * free_path_l);
+  
+  // Allow some margin to account for small errors
+  if(free_path_l <= 0.01){
+    // Destination reached! Come to a stop as quickly as possible if not already at one.
+    double new_vel = speed - (MAX_SPEED / CTRL_FREQ);
+    if(new_vel < 0){
+      new_vel = 0;
+    }
+    return new_vel;
+  }
+  // This can be improved in the case when the robot is not yet at max velocity but accel_dist > free_path_l
+  
+  else if(speed < MAX_SPEED && accel_dist < free_path_l){
+    // Accelerate!
+    double new_vel = speed_after_accel;
+    if(new_vel > MAX_SPEED){
+      new_vel = MAX_SPEED;
+    }
+    return new_vel;
+  }
+  else if(cruise_dist < free_path_l){
+    // Cruise!
+    return speed;
+  }
+  else{
+    // Slam the brakes! 
+    double new_vel = speed - (brake_accel / CTRL_FREQ);
+    return new_vel;
+  }
+
+}
+
 void Navigation::Run() {
   // This function gets called 20 times a second to form the control loop.
   
@@ -129,9 +182,10 @@ void Navigation::Run() {
   
   // The latest observed point cloud is accessible via "point_cloud_"
 
+
   // Eventually, you will have to set the control values to issue drive commands:
   drive_msg_.curvature = 0;
-  drive_msg_.velocity = 1;
+  drive_msg_.velocity = MoveForward(3.0 - (odom_loc_ - odom_start_loc_).norm());
 
  
 
