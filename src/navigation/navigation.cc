@@ -148,7 +148,7 @@ double Navigation::MoveForward(double free_path_l){
   double cruise_dist = (speed / CTRL_FREQ) + brake_dist(speed);
 
   // Acceleration that would be required to come to a full stop right as free path length hits zero
-  double brake_accel = (speed * speed) / (2 * free_path_l);
+  // double brake_accel = (speed * speed) / (2 * free_path_l);
   
   // Allow some margin to account for small errors
   if(free_path_l <= 0.01){
@@ -175,7 +175,7 @@ double Navigation::MoveForward(double free_path_l){
   }
   else{
     // Slam the brakes! 
-    double new_vel = speed - (brake_accel / CTRL_FREQ);
+    double new_vel = speed - (MAX_ACCEL / CTRL_FREQ);
     return new_vel;
   }
 
