@@ -153,7 +153,7 @@ double Navigation::MoveForward(double free_path_l){
   // Allow some margin to account for small errors
   if(free_path_l <= 0.01){
     // Destination reached! Come to a stop as quickly as possible if not already at one.
-    double new_vel = speed - (MAX_SPEED / CTRL_FREQ);
+    double new_vel = speed - (MAX_ACCEL / CTRL_FREQ);
     if(new_vel < 0){
       new_vel = 0;
     }
