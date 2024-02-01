@@ -56,6 +56,8 @@ VisualizationMsg local_viz_msg_;
 VisualizationMsg global_viz_msg_;
 AckermannCurvatureDriveMsg drive_msg_;
 // Epsilon value for handling limited numerical precision.
+const float carLength = 50.0;
+const float carWidth = 28.0;
 const float kEpsilon = 1e-5;
 const float w_clearance = 0.5;
 const float w_distance_to_goal = -0.5;
