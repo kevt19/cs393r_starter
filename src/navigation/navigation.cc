@@ -114,13 +114,11 @@ void Navigation::UpdateOdometry(const Vector2f& loc,
 
 Vector2f Navigation::CompensateLatencyLoc(const Vector2f& loc, float curvature, double latency) {
   // Calculate tangential velocity
-  if curvature < kEpsilon) {
+  if (curvature < kEpsilon) {
     return loc;
   }
-  float R = 1 / curvature;
-  float tangential_velocity = R * angular_velocity_;
-  float new_x = loc.x() + tangential_velocity * cos(robot_omega_) * latency;
-  float new_y = loc.y() + tangential_velocity * sin(robot_omega_) * latency;
+  float new_x = loc.x() + robot_vel_ * cos(robot_omega_) * latency;
+  float new_y = loc.y() + robot_vel_ * sin(robot_omega_) * latency;
 
   return Vector2f(new_x, new_y);
 }
