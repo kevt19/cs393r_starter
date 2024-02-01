@@ -250,7 +250,7 @@ void Navigation::Run() {
   if(control_queue_.Size() > MAX_CONTROLS_IN_LATENCY){
     control_queue_.Pop();
   }
-  queue.Push(control, ros::Time::now()); 
+  control_queue_.Push(control, ros::Time::now()); 
 
   // Add timestamps to all messages.
   local_viz_msg_.header.stamp = ros::Time::now();
