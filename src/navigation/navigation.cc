@@ -33,6 +33,7 @@
 #include "shared/ros/ros_helpers.h"
 #include "navigation.h"
 #include "visualization/visualization.h"
+#include <iostream>
 
 using Eigen::Vector2f;
 using amrl_msgs::AckermannCurvatureDriveMsg;
@@ -131,6 +132,8 @@ void Navigation::Run() {
   // Eventually, you will have to set the control values to issue drive commands:
   drive_msg_.curvature = 0;
   drive_msg_.velocity = 1;
+
+ 
 
   // Add timestamps to all messages.
   local_viz_msg_.header.stamp = ros::Time::now();

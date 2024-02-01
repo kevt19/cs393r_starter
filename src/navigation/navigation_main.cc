@@ -26,6 +26,8 @@
 #include <string.h>
 #include <inttypes.h>
 #include <vector>
+#include <iostream>
+
 
 #include "glog/logging.h"
 #include "gflags/gflags.h"
@@ -94,6 +96,18 @@ void LaserCallback(const sensor_msgs::LaserScan& msg) {
   // msg.range_max // Maximum observable range
   // msg.range_min // Minimum observable range
   // msg.ranges[i] // The range of the i'th ray
+
+  int i = 0;
+  for (float theta = msg.angle_min; theta <= msg.angle_max; theta += msg.angle_increment)
+  {
+    float range = msg.ranges.at(i);
+    
+    point_cloud_.push_back(Vector2f {kLaserLoc[0] + range*cos(theta), kLaserLoc[1] + range*sin(theta)});
+    
+    i++;
+
+  }
+  
   navigation_->ObservePointCloud(point_cloud_, msg.header.stamp.toSec());
   last_laser_msg_ = msg;
 }
@@ -145,17 +159,11 @@ int main(int argc, char** argv) {
   ros::NodeHandle n;
   navigation_ = new Navigation(FLAGS_map, &n);
 
-  ros::Subscriber string_sub = 
-      n.subscribe("string_topic", 1, &StringCallback);
-
-  ros::Subscriber velocity_sub =
-      n.subscribe(FLAGS_odom_topic, 1, &OdometryCallback);
-  ros::Subscriber localization_sub =
-      n.subscribe(FLAGS_loc_topic, 1, &LocalizationCallback);
-  ros::Subscriber laser_sub =
-      n.subscribe(FLAGS_laser_topic, 1, &LaserCallback);
-  ros::Subscriber goto_sub =
-      n.subscribe("/move_base_simple/goal", 1, &GoToCallback);
+  ros::Subscriber string_sub = n.subscribe("string_topic", 1, &StringCallback);
+  ros::Subscriber velocity_sub = n.subscribe(FLAGS_odom_topic, 1, &OdometryCallback);
+  ros::Subscriber localization_sub = n.subscribe(FLAGS_loc_topic, 1, &LocalizationCallback);
+  ros::Subscriber laser_sub = n.subscribe(FLAGS_laser_topic, 1, &LaserCallback);
+  ros::Subscriber goto_sub = n.subscribe("/move_base_simple/goal", 1, &GoToCallback);
 
   RateLoop loop(20.0);
   while (run_ && ros::ok()) {
