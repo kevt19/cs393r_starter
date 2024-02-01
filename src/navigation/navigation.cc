@@ -109,9 +109,25 @@ void Navigation::UpdateOdometry(const Vector2f& loc,
   odom_angle_ = angle;
 }
 
+Vector2f Navigation::CompensateLatencyLoc(const Vector2f& loc, float curvature, double latency) {
+  // Calculate tangential velocity
+  float R = 1 / curvature; // Ensure curvature_ is not zero to avoid division by zero
+  float tangential_velocity = R * angular_velocity_; // v = R * ω
+
+  // Assuming robot_angle_ is the current direction of movement along the tangent of the arc
+  float new_x = loc.x() + tangential_velocity * cos(robot_omega_) * latency;
+  float new_y = loc.y() + tangential_velocity * sin(robot_omega_) * latency;
+
+  return Vector2f(new_x, new_y);
+}
+
 void Navigation::ObservePointCloud(const vector<Vector2f>& cloud,
                                    double time) {
   point_cloud_ = cloud;                                     
+}
+
+float Navigation::ComputeDistanceToGoal(const Vector2f& loc) {
+  return (loc - nav_goal_loc_).norm();
 }
 
 void Navigation::Run() {
