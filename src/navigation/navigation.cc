@@ -61,6 +61,8 @@ const float w_clearance = 0.5;
 const float w_distance_to_goal = -0.5;
 const float w_free_path_length = 0.5;
 const float latency = 0.125;
+const int MAX_CONTROLS_IN_LATENCY = static_cast<int>(ceil(latency / (1 / CTRL_FREQ)));
+const float time_per_control = 1.0 / CTRL_FREQ;
 } //namespace
 
 namespace navigation {
@@ -126,18 +128,11 @@ Odometry Navigation::CompensateLatencyLoc() {
   float current_y = robot_loc_.y();
   float current_omega = robot_omega_;
 
-  double time_per_control = 1.0 / CTRL_FREQ;
-  int n_controls = static_cast<int>(ceil(latency / time_per_control));
-
-  for (int i = 0; i < n_controls; i++) {
+  for (int i = 0; i < MAX_CONTROLS_IN_LATENCY; i++) {
     Control control = control_queue_.Top();
     control_queue_.Pop();
     vel = control.velocity;
     curv = control.curvature;
-    // Calculate tangential velocity
-    if (curvature < kEpsilon) {
-      break;
-    }
     current_x += vel * cos(current_omega) * time_per_control;
     current_y += vel * sin(current_omega) * time_per_control;
     current_omega += vel * curv * time_per_control;
@@ -250,6 +245,11 @@ void Navigation::Run() {
   Control control;
   control.velocity = drive_msg_.velocity;
   control.curvature = drive_msg_.curvature;
+  
+  // if queue is too big, remove
+  if(control_queue_.Size() > MAX_CONTROLS_IN_LATENCY){
+    control_queue_.Pop();
+  }
   queue.Push(control, ros::Time::now()); 
 
   // Add timestamps to all messages.
