@@ -70,9 +70,11 @@ class Navigation {
                       const Eigen::Vector2f& vel,
                       float ang_vel);
 
-float Navigation::ComputeScore(float free_path_length, float clearance, float distance_to_goal);
+  float ComputeScore(float free_path_length, float clearance, float distance_to_goal);
 
-float Navigation::ComputeDistanceToGoal(const Vector2f& loc);
+  float ComputeDistanceToGoal(const Vector2f& loc);
+
+  vector<Vector2f> CompensatePointCloud(const vector<Vector2f>& cloud, const Odometry& odometry);
 
   // Updates based on an observed laser scan
   void ObservePointCloud(const std::vector<Eigen::Vector2f>& cloud,

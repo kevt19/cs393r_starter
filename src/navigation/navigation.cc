@@ -148,6 +148,21 @@ Odometry Navigation::CompensateLatencyLoc() {
   return odometry;
 }
 
+vector<Vector2f> Navigation::CompensatePointCloud(const vector<Vector2f>& cloud, const Odometry& odometry) {
+  vector<Vector2f> compensated_cloud;
+  
+  float delta_x = odometry.loc.x() - robot_loc_.x();
+  float delta_y = odometry.loc.y() - robot_loc_.y();
+  float delta_omega = odometry.omega - robot_omega_;
+
+  for (const auto& point : cloud) {
+    float x = point.x() - delta_x;
+    float y = point.y() - delta_y;
+    compensated_cloud.push_back(Vector2f(x, y));
+  }
+  return compensated_cloud;
+}
+
 void Navigation::ObservePointCloud(const vector<Vector2f>& cloud,
                                    double time) {
   point_cloud_ = cloud;                                     
