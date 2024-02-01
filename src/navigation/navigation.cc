@@ -19,6 +19,7 @@
 */
 //========================================================================
 
+#include <cmath>
 #include "gflags/gflags.h"
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
@@ -59,6 +60,7 @@ const float kEpsilon = 1e-5;
 const float w_clearance = 0.5;
 const float w_distance_to_goal = -0.5;
 const float w_free_path_length = 0.5;
+const float latency = 0.125;
 } //namespace
 
 namespace navigation {
@@ -116,15 +118,34 @@ void Navigation::UpdateOdometry(const Vector2f& loc,
   odom_angle_ = angle;
 }
 
-Vector2f Navigation::CompensateLatencyLoc(const Vector2f& loc, float curvature, double latency) {
-  // Calculate tangential velocity
-  if (curvature < kEpsilon) {
+Odometry Navigation::CompensateLatencyLoc() {
+  if (control_queue_.Empty()) {
     return loc;
   }
-  float new_x = loc.x() + robot_vel_ * cos(robot_omega_) * latency;
-  float new_y = loc.y() + robot_vel_ * sin(robot_omega_) * latency;
+  float current_x = robot_loc_.x();
+  float current_y = robot_loc_.y();
+  float current_omega = robot_omega_;
 
-  return Vector2f(new_x, new_y);
+  double time_per_control = 1.0 / CTRL_FREQ;
+  int n_controls = static_cast<int>(ceil(latency / time_per_control));
+
+  for (int i = 0; i < n_controls; i++) {
+    Control control = control_queue_.Top();
+    control_queue_.Pop();
+    vel = control.velocity;
+    curv = control.curvature;
+    // Calculate tangential velocity
+    if (curvature < kEpsilon) {
+      break;
+    }
+    current_x += vel * cos(current_omega) * time_per_control;
+    current_y += vel * sin(current_omega) * time_per_control;
+    current_omega += vel * curv * time_per_control;
+  }
+  Odom odometry;
+  odometry.loc = Vector2f(current_x, current_y);
+  odometry.omega = current_omega;
+  return odometry;
 }
 
 void Navigation::ObservePointCloud(const vector<Vector2f>& cloud,
@@ -209,8 +230,12 @@ void Navigation::Run() {
   // Eventually, you will have to set the control values to issue drive commands:
   drive_msg_.curvature = 0;
   drive_msg_.velocity = MoveForward(3.0 - (odom_loc_ - odom_start_loc_).norm());
-
- 
+  
+  // add control given to Queue
+  Control control;
+  control.velocity = drive_msg_.velocity;
+  control.curvature = drive_msg_.curvature;
+  queue.Push(control, ros::Time::now()); 
 
   // Add timestamps to all messages.
   local_viz_msg_.header.stamp = ros::Time::now();

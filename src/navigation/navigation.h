@@ -25,6 +25,8 @@
 
 #include "vector_map/vector_map.h"
 
+#include "simple_queue.h"
+
 #ifndef NAVIGATION_H
 #define NAVIGATION_H
 
@@ -33,6 +35,16 @@ namespace ros {
 }  // namespace ros
 
 namespace navigation {
+
+struct Control{
+  float speed;
+  float curvature;
+};
+
+struct Odom{
+  Eigen::Vector2f loc;
+  float omega;
+};
 
 struct PathOption {
   float curvature;
@@ -58,9 +70,15 @@ class Navigation {
                       const Eigen::Vector2f& vel,
                       float ang_vel);
 
+float Navigation::ComputeScore(float free_path_length, float clearance, float distance_to_goal);
+
+float Navigation::ComputeDistanceToGoal(const Vector2f& loc);
+
   // Updates based on an observed laser scan
   void ObservePointCloud(const std::vector<Eigen::Vector2f>& cloud,
                          double time);
+
+  Odometry CompensateLatencyLoc();
 
   // Move forward a specified distance 
   double MoveForward(double free_path_l);
@@ -103,6 +121,8 @@ class Navigation {
   float nav_goal_angle_;
   // Map of the environment.
   vector_map::VectorMap map_;
+
+  SimpleQueue<Control, double> control_queue_;
 };
 
 }  // namespace navigation
