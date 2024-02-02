@@ -37,11 +37,12 @@ namespace ros {
 namespace navigation {
 
 struct Control{
-  float speed;
+  float velocity;
   float curvature;
+  double time;
 };
 
-struct Odom{
+struct Odometry{
   Eigen::Vector2f loc;
   float omega;
 };
@@ -72,9 +73,9 @@ class Navigation {
 
   float ComputeScore(float free_path_length, float clearance, float distance_to_goal);
 
-  float ComputeDistanceToGoal(const Vector2f& loc);
+  float ComputeDistanceToGoal(const Eigen::Vector2f& loc);
 
-  vector<Vector2f> CompensatePointCloud(const vector<Vector2f>& cloud, const Odometry& odometry);
+  std::vector<Eigen::Vector2f> CompensatePointCloud(const std::vector<Eigen::Vector2f>& cloud, const Odometry& odometry);
 
   // Updates based on an observed laser scan
   void ObservePointCloud(const std::vector<Eigen::Vector2f>& cloud,
@@ -124,7 +125,8 @@ class Navigation {
   // Map of the environment.
   vector_map::VectorMap map_;
 
-  SimpleQueue<Control, double> control_queue_;
+  // mantains the past controls sent: velocity, omega, time
+  std::vector<Control> past_controls_;
 };
 
 }  // namespace navigation
