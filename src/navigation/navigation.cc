@@ -186,37 +186,18 @@ double Navigation::MoveForward(double free_path_l){
 
   // Distance that would be covered by cruising for one time step
   double cruise_dist = (speed / CTRL_FREQ) + brake_dist(speed);
-
-  // Acceleration that would be required to come to a full stop right as free path length hits zero
-  // double brake_accel = (speed * speed) / (2 * free_path_l);
   
-  // Allow some margin to account for small errors
-  if(free_path_l <= 0.01){
-    // Destination reached! Come to a stop as quickly as possible if not already at one.
-    double new_vel = speed - (MAX_ACCEL / CTRL_FREQ);
-    if(new_vel < 0){
-      new_vel = 0;
-    }
-    return new_vel;
-  }
-  // This can be improved in the case when the robot is not yet at max velocity but accel_dist > free_path_l
-  
-  else if(speed < MAX_SPEED && accel_dist < free_path_l){
+  if(speed < MAX_SPEED && accel_dist < free_path_l){
     // Accelerate!
-    double new_vel = speed_after_accel;
-    if(new_vel > MAX_SPEED){
-      new_vel = MAX_SPEED;
-    }
-    return new_vel;
+    return MAX_SPEED;
   }
   else if(cruise_dist < free_path_l){
     // Cruise!
-    return speed;
+    return MAX_SPEED;
   }
   else{
     // Slam the brakes! 
-    double new_vel = speed - (MAX_ACCEL / CTRL_FREQ);
-    return new_vel;
+    return 0.0;
   }
 
 }
