@@ -73,7 +73,15 @@ class Navigation {
 
   float ComputeScore(float free_path_length, float clearance, float distance_to_goal);
 
-  float ComputeDistanceToGoal(const Eigen::Vector2f& loc);
+  float ComputeFreePathLength(double curvature);
+
+  float ComputeDistanceToGoal(double curvature, double free_path_length);
+
+  float ComputeClearance(double curvature, double free_path_length);
+
+  void FindBestPath(double& target_curvature, double& target_free_path_l);
+
+
 
   std::vector<Eigen::Vector2f> CompensatePointCloud(const std::vector<Eigen::Vector2f>& cloud, const Odometry& odometry);
 

@@ -36,9 +36,9 @@
 #include "visualization/visualization.h"
 #include <iostream>
 
-#define MAX_ACCEL 4.0
-#define MAX_SPEED 1.0
-#define CTRL_FREQ 20.0
+// #define MAX_ACCEL 4.0
+// #define MAX_SPEED 1.0
+// #define CTRL_FREQ 20.0
 
 using Eigen::Vector2f;
 using amrl_msgs::AckermannCurvatureDriveMsg;
@@ -55,16 +55,36 @@ ros::Publisher viz_pub_;
 VisualizationMsg local_viz_msg_;
 VisualizationMsg global_viz_msg_;
 AckermannCurvatureDriveMsg drive_msg_;
+
+// Car Size Constants
+const float CAR_LENGTH = 0.50;
+const float CAR_WIDTH = 0.28;
+const float SAFETY_MARGIN = 0.2;
+const float BASE_TO_FRONT = 0.41;
+
+// Kinematic Constraints
+const float MAX_ACCEL = 4.0;
+const float MAX_SPEED = 1.0;
+const float CTRL_FREQ = 20.0;
+
 // Epsilon value for handling limited numerical precision.
-const float carLength = 0.50;
-const float carWidth = 0.28;
 const float kEpsilon = 1e-5;
+
+// Scoring Weights
 const float w_clearance = 0.5;
-const float w_distance_to_goal = -0.5;
+const float w_distance_to_goal = 0;
 const float w_free_path_length = 0.5;
-const float latency = 0.125;
-const int MAX_CONTROLS_IN_LATENCY = static_cast<int>(ceil(latency / (1 / CTRL_FREQ)));
-const float time_per_control = 1.0 / CTRL_FREQ;
+
+// Latency Values
+const float LATENCY = 0.125;
+const int MAX_CONTROLS_IN_LATENCY = static_cast<int>(ceil(LATENCY / (1 / CTRL_FREQ)));
+const float TIME_PER_CONTROL = 1.0 / CTRL_FREQ;
+
+// Path Search Parameters
+const float MAX_CURVATURE = 1;
+const float MIN_CURVATURE = -1;
+const float NUM_POSSIBLE_PATHS = 21;
+
 } //namespace
 
 namespace navigation {
@@ -128,7 +148,7 @@ Odometry Navigation::CompensateLatencyLoc() {
   float current_omega = robot_omega_;
 
   double current_time = ros::Time::now().toSec();
-  double min_relevant_time = current_time - latency;
+  double min_relevant_time = current_time - LATENCY;
 
   // remove controls that are not relevant
   int i = 0;
@@ -141,9 +161,9 @@ Odometry Navigation::CompensateLatencyLoc() {
     float curv = control.curvature;
     // double time = control.time;
 
-    current_x += vel * cos(current_omega) * time_per_control;
-    current_y += vel * sin(current_omega) * time_per_control;
-    current_omega += vel * curv * time_per_control;
+    current_x += vel * cos(current_omega) * TIME_PER_CONTROL;
+    current_y += vel * sin(current_omega) * TIME_PER_CONTROL;
+    current_omega += vel * curv * TIME_PER_CONTROL;
   }
 
   Odometry odometry;
@@ -206,12 +226,133 @@ float Navigation::ComputeScore(float free_path_length, float clearance, float di
   return w_free_path_length * free_path_length + w_clearance * clearance + w_distance_to_goal * distance_to_goal;
 }
 
+float Navigation::ComputeFreePathLength(double curvature){
+  double free_path_l = __DBL_MAX__;
+  Vector2f target_point(0,0);
 
-float Navigation::ComputeDistanceToGoal(const Vector2f& loc) {
-  return (loc - nav_goal_loc_).norm();
+  // Special case for going forward
+  if(abs(curvature) < kEpsilon){
+    // Determine which points are possible obstacles
+    vector<Vector2f> possible_obstacles;
+    for(auto point : point_cloud_){
+      if(abs(point.y()) <= ((CAR_WIDTH / 2) + SAFETY_MARGIN)){
+        possible_obstacles.push_back(point);
+      }
+    }
+
+    // Determine which possible obstacle is closest, and find that obstacle's free path length
+    for(auto point : possible_obstacles){
+      double cur_free_path_l = point.x() - (BASE_TO_FRONT + SAFETY_MARGIN);
+      if (cur_free_path_l < free_path_l){
+        free_path_l = cur_free_path_l;
+        target_point = point;
+      }
+    }
+
+    // If path is too long or there are no obstacles, go up to the goal
+    if(free_path_l > nav_goal_loc_.norm() || possible_obstacles.size() <= 0){
+      free_path_l = nav_goal_loc_.norm();
+    }
+  }
+
+  // Otherwise, the car is turning
+  else{
+    double radius = 1 / curvature;
+    Vector2f center_of_turn(0, radius);
+    // Limit of how long the free path length can be before getting further away from the goal
+    double fpl_lim = atan(nav_goal_loc_.norm() / abs(radius)) * abs(radius);
+    double r1 = abs(radius) - ((CAR_WIDTH / 2) + SAFETY_MARGIN);
+    double r2 = Vector2f(BASE_TO_FRONT + SAFETY_MARGIN, abs(radius) + ((CAR_WIDTH / 2) + SAFETY_MARGIN)).norm();
+
+    // Determine which points are possible obstacles
+    vector<Vector2f> possible_obstacles;
+    for(auto point : point_cloud_){
+      
+      double theta = atan2(point.x(), (radius - point.y()));
+      if((point - center_of_turn).norm() >= r1 && (point - center_of_turn).norm() <= r2 && theta > 0){
+        possible_obstacles.push_back(point);
+      };
+    }
+
+    // Determine which possible obstacle is closest, and find that obstacle's free path length
+    for(auto point : possible_obstacles){
+      double theta = atan2(point.x(), (abs(radius) - abs(point.y())));
+      double omega = atan2(BASE_TO_FRONT + SAFETY_MARGIN, (abs(radius) - ((CAR_WIDTH / 2) + SAFETY_MARGIN)));
+      double psi   = theta - omega;
+      double cur_free_path_l = abs(radius) * psi;
+
+      // Adjust to limit FPL to closest point of approach to the goal
+      if(cur_free_path_l > fpl_lim){
+        cur_free_path_l = fpl_lim;
+      }
+
+      // Choose the shortest free path length
+      if (cur_free_path_l < free_path_l){
+        free_path_l = cur_free_path_l;
+        target_point = point;
+      }
+    }
+
+    // If no obstacles, go as far as possible before getting further away from the goal
+    if(possible_obstacles.size() <= 0){
+      free_path_l = fpl_lim;
+    }
+  }
+
+  return free_path_l;
+}
+
+float Navigation::ComputeDistanceToGoal(double curvature, double free_path_length) {
+  Eigen::Vector2f endpoint;
+
+  // Calculate where the car ends up at the end of the free path
+  if(abs(curvature) < 0.05){
+    endpoint = Vector2f(0, free_path_length);
+  }
+  else{
+    double radius = 1 / curvature;
+    double psi = free_path_length / abs(radius);
+    Eigen::Rotation2Df rot(psi);
+    endpoint = (rot * Vector2f(0, -radius)) + Vector2f(0, radius); 
+  }
+
+  return (nav_goal_loc_ - endpoint).norm();
+}
+
+float Navigation::ComputeClearance(double curvature, double free_path_length){
+  return 0;
+}
+
+void Navigation::FindBestPath(double& target_curvature, double& target_free_path_l){
+  double best_score = -1000;
+
+  float curvature_range = MAX_CURVATURE - MIN_CURVATURE;
+  float incr = curvature_range / (NUM_POSSIBLE_PATHS - 1);
+  float curr_curv = MIN_CURVATURE;
+
+  // Iterate over all possible paths, scoring each one
+  for(int i = 0; i < NUM_POSSIBLE_PATHS; i++){
+    double free_path_l = ComputeFreePathLength(curr_curv);
+    if (curr_curv < 0){
+      std::cout << free_path_l << std::endl;
+    }
+    double clearance = ComputeClearance(curr_curv, free_path_l);
+    double goal_dist = ComputeDistanceToGoal(curr_curv, free_path_l);
+    double curr_score = ComputeScore(free_path_l, clearance, goal_dist);
+
+    if(curr_score > best_score){
+      best_score = curr_score;
+      target_curvature = curr_curv;
+      target_free_path_l = free_path_l;
+    }
+
+    curr_curv += incr;
+  } 
 }
 
 void Navigation::Run() {
+  nav_goal_loc_ = Eigen::Vector2f(5.0, 0);
+  
   // This function gets called 20 times a second to form the control loop.
   
   // Clear previous visualizations.
@@ -228,8 +369,12 @@ void Navigation::Run() {
 
 
   // Eventually, you will have to set the control values to issue drive commands:
-  drive_msg_.curvature = 0;
-  drive_msg_.velocity = MoveForward(3.0 - (odom_loc_ - odom_start_loc_).norm());
+  double curvature = 0;
+  double free_path_l = 0;
+  FindBestPath(curvature, free_path_l);
+
+  drive_msg_.curvature = curvature;
+  drive_msg_.velocity = MoveForward(free_path_l);
   
   // add control given to Queue
   Control control;
