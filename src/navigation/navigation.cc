@@ -429,14 +429,6 @@ void Navigation::FindBestPath(double& target_curvature, double& target_free_path
     curr_path.fpl = free_path_l;
     coarse_scores_queue.Push(curr_path, curr_score);
 
-    // if(curr_score > best_score){
-    //   best_score = curr_score;
-    //   target_curvature = curr_curv;
-    //   target_free_path_l = free_path_l;
-    // }
-
-    // visualization::DrawPathOption(curr_curv, free_path_l, clearance, 0x111111, false, local_viz_msg_);
-
     curr_curv += incr;
   } 
 
