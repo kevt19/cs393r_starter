@@ -59,8 +59,9 @@ AckermannCurvatureDriveMsg drive_msg_;
 // Car Size Constants
 const float CAR_LENGTH = 0.50;
 const float CAR_WIDTH = 0.28;
-const float SAFETY_MARGIN = 0.2;
+const float SAFETY_MARGIN = 0.15;
 const float BASE_TO_FRONT = 0.41;
+const float BACK_TO_BASE = 0.135;
 
 // Kinematic Constraints
 const float MAX_ACCEL = 4.0;
@@ -71,9 +72,9 @@ const float CTRL_FREQ = 20.0;
 const float kEpsilon = 1e-5;
 
 // Scoring Weights
-const float w_clearance = 0.5;
+const float w_clearance = 0;
 const float w_distance_to_goal = 0;
-const float w_free_path_length = 0.5;
+const float w_free_path_length = 1;
 
 // Latency Values
 const float LATENCY = 0.125;
@@ -83,7 +84,10 @@ const float TIME_PER_CONTROL = 1.0 / CTRL_FREQ;
 // Path Search Parameters
 const float MAX_CURVATURE = 1;
 const float MIN_CURVATURE = -1;
-const float NUM_POSSIBLE_PATHS = 21;
+const float NUM_POSSIBLE_PATHS = 81;
+
+// Clearance Parameters
+const float MAX_CLEARANCE = 5;
 
 } //namespace
 
@@ -299,6 +303,9 @@ float Navigation::ComputeFreePathLength(double curvature){
     }
   }
 
+  if(free_path_l < 0){
+    return 0;
+  }
   return free_path_l;
 }
 
@@ -320,7 +327,74 @@ float Navigation::ComputeDistanceToGoal(double curvature, double free_path_lengt
 }
 
 float Navigation::ComputeClearance(double curvature, double free_path_length){
-  return 0;
+  double clearance = MAX_CLEARANCE;
+  Eigen::Vector2f clearance_point(0,0);
+
+  // Moving straight case
+  if(abs(curvature) < kEpsilon) {
+    // Determine which points will possibly affect clearance
+    vector<Vector2f> clearance_points;
+    for(auto point : point_cloud_){
+      if(point.x() > BACK_TO_BASE && point.x() < (free_path_length + BASE_TO_FRONT + SAFETY_MARGIN - 0.1) && abs(point.y()) < MAX_CLEARANCE){
+        clearance_points.push_back(point);
+      }
+    }
+
+    // Determine which point is closest, and find that point's clearance
+    for(auto point : clearance_points){
+      double curr_clearance = abs(point.y()) - ((CAR_WIDTH / 2) + SAFETY_MARGIN);
+      if (curr_clearance < clearance){
+        clearance = curr_clearance;
+        clearance_point = point;
+      }
+    }
+  }
+
+  // Moving on a curve case
+  else{
+    double radius = 1 / curvature;
+    Eigen::Vector2f center_of_turn(0, radius);
+    double r1 = abs(radius) - ((CAR_WIDTH / 2) + SAFETY_MARGIN);
+    double r2 = Vector2f(BASE_TO_FRONT + SAFETY_MARGIN, abs(radius) + ((CAR_WIDTH / 2) + SAFETY_MARGIN)).norm();
+
+    // Determine which points will possibly affect clearance
+    vector<Eigen::Vector2f> clearance_points;
+    for(auto point : point_cloud_){
+      double theta_p = atan2(point.x(), radius - point.y());
+      double omega = atan2(BASE_TO_FRONT + SAFETY_MARGIN, radius - ((CAR_WIDTH / 2) + SAFETY_MARGIN));
+      double psi = free_path_length / abs(radius);
+      double theta_max = omega + psi - 0.05;
+      if(abs((center_of_turn - point).norm() - abs(radius)) < MAX_CLEARANCE && theta_p > 0 && theta_p < theta_max){
+        clearance_points.push_back(point);
+      };
+    }
+
+
+    // Determine which point is closest, and find that point's clearance
+    for(auto point : clearance_points){
+      double curr_clearance;
+      if((center_of_turn - point).norm() > abs(radius)){
+        curr_clearance = (center_of_turn - point).norm() - r2;
+      }
+      else{
+        curr_clearance = r1 - (center_of_turn - point).norm();
+        // Ignore points that end up with negative clearance
+        if(curr_clearance < 0){
+          curr_clearance = MAX_CLEARANCE;
+        }
+      }
+
+      if (curr_clearance < clearance){
+        clearance = curr_clearance;
+        clearance_point = point;
+      }
+    }
+  }
+
+  // Draw point used to calculate clearance
+  // visualization::DrawCross(clearance_point, 0.175, 0x00f00f, local_viz_msg_);
+
+  return clearance;
 }
 
 void Navigation::FindBestPath(double& target_curvature, double& target_free_path_l){
@@ -333,9 +407,6 @@ void Navigation::FindBestPath(double& target_curvature, double& target_free_path
   // Iterate over all possible paths, scoring each one
   for(int i = 0; i < NUM_POSSIBLE_PATHS; i++){
     double free_path_l = ComputeFreePathLength(curr_curv);
-    if (curr_curv < 0){
-      std::cout << free_path_l << std::endl;
-    }
     double clearance = ComputeClearance(curr_curv, free_path_l);
     double goal_dist = ComputeDistanceToGoal(curr_curv, free_path_l);
     double curr_score = ComputeScore(free_path_l, clearance, goal_dist);
@@ -346,8 +417,12 @@ void Navigation::FindBestPath(double& target_curvature, double& target_free_path
       target_free_path_l = free_path_l;
     }
 
+    visualization::DrawPathOption(curr_curv, free_path_l, clearance, 0x111111, false, local_viz_msg_);
+
     curr_curv += incr;
   } 
+
+  visualization::DrawPathOption(target_curvature, target_free_path_l, 0, 0x0000ff, false, local_viz_msg_);
 }
 
 void Navigation::Run() {
@@ -361,6 +436,15 @@ void Navigation::Run() {
 
   // If odometry has not been initialized, we can't do anything.
   if (!odom_initialized_) return;
+
+  // Draw box around car
+  visualization::DrawLine(Vector2f(BASE_TO_FRONT, CAR_WIDTH / 2), Vector2f(BASE_TO_FRONT, -CAR_WIDTH / 2), 0xff0000, local_viz_msg_);
+  visualization::DrawLine(Vector2f(BASE_TO_FRONT, CAR_WIDTH / 2), Vector2f(-BACK_TO_BASE, CAR_WIDTH / 2), 0xff0000, local_viz_msg_);
+  visualization::DrawLine(Vector2f(BASE_TO_FRONT, -CAR_WIDTH / 2), Vector2f(-BACK_TO_BASE, -CAR_WIDTH / 2), 0xff0000, local_viz_msg_);
+  visualization::DrawLine(Vector2f(-BACK_TO_BASE, CAR_WIDTH / 2), Vector2f(-BACK_TO_BASE, -CAR_WIDTH / 2), 0xff0000, local_viz_msg_);
+
+  // Draw safety margin in front of car
+  visualization::DrawLine(Vector2f(BASE_TO_FRONT + SAFETY_MARGIN, CAR_WIDTH / 2 + SAFETY_MARGIN), Vector2f(BASE_TO_FRONT + SAFETY_MARGIN, -(CAR_WIDTH / 2 + SAFETY_MARGIN)), 0xff0000, local_viz_msg_);
 
   // The control iteration goes here. 
   // Feel free to make helper functions to structure the control appropriately.
