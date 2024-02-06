@@ -82,9 +82,12 @@ const int MAX_CONTROLS_IN_LATENCY = static_cast<int>(ceil(LATENCY / (1 / CTRL_FR
 const float TIME_PER_CONTROL = 1.0 / CTRL_FREQ;
 
 // Path Search Parameters
-const float MAX_CURVATURE = 1;
-const float MIN_CURVATURE = -1;
-const float NUM_POSSIBLE_PATHS = 81;
+const float NUM_COARSE_GRAIN_POSSIBLE_PATHS = 31;
+const float MAX_COARSE_CURVATURE = 1;
+const float MIN_COARSE_CURVATURE = -1;
+const float NUM_BEST_COARSE_PATHS_TO_CONSIDER = 3;
+const float FINE_CURVATURE_SEARCH_RANGE = 0.1;
+const float NUM_FINE_GRAIN_POSSIBLE_PATHS = 11;
 
 // Clearance Parameters
 const float MAX_CLEARANCE = 5;
@@ -397,32 +400,71 @@ float Navigation::ComputeClearance(double curvature, double free_path_length){
   return clearance;
 }
 
-void Navigation::FindBestPath(double& target_curvature, double& target_free_path_l){
-  double best_score = -1000;
 
-  float curvature_range = MAX_CURVATURE - MIN_CURVATURE;
-  float incr = curvature_range / (NUM_POSSIBLE_PATHS - 1);
-  float curr_curv = MIN_CURVATURE;
+
+void Navigation::FindBestPath(double& target_curvature, double& target_free_path_l){
+  float curvature_range = MAX_COARSE_CURVATURE - MIN_COARSE_CURVATURE;
+  float incr = curvature_range / (NUM_COARSE_GRAIN_POSSIBLE_PATHS - 1);
+  float curr_curv = MIN_COARSE_CURVATURE;
+
+  struct PossiblePath{
+    double curv;
+    double fpl;
+
+    bool operator==(const PossiblePath& other) const {
+        return false;
+    }
+  };
+  SimpleQueue<PossiblePath, double> coarse_scores_queue;
 
   // Iterate over all possible paths, scoring each one
-  for(int i = 0; i < NUM_POSSIBLE_PATHS; i++){
+  for(int i = 0; i < NUM_COARSE_GRAIN_POSSIBLE_PATHS; i++){
     double free_path_l = ComputeFreePathLength(curr_curv);
     double clearance = ComputeClearance(curr_curv, free_path_l);
     double goal_dist = ComputeDistanceToGoal(curr_curv, free_path_l);
     double curr_score = ComputeScore(free_path_l, clearance, goal_dist);
 
-    if(curr_score > best_score){
-      best_score = curr_score;
-      target_curvature = curr_curv;
-      target_free_path_l = free_path_l;
-    }
-
-    visualization::DrawPathOption(curr_curv, free_path_l, clearance, 0x111111, false, local_viz_msg_);
+    PossiblePath curr_path;
+    curr_path.curv = curr_curv;
+    curr_path.fpl = free_path_l;
+    coarse_scores_queue.Push(curr_path, curr_score);
 
     curr_curv += incr;
   } 
 
-  visualization::DrawPathOption(target_curvature, target_free_path_l, 0, 0x0000ff, false, local_viz_msg_);
+
+  SimpleQueue<PossiblePath, double> fine_scores_queue;
+
+  for(int i = 0; i < NUM_BEST_COARSE_PATHS_TO_CONSIDER; i++){
+    PossiblePath curr_coarse_path = coarse_scores_queue.Pop();
+
+    visualization::DrawPathOption(curr_coarse_path.curv, curr_coarse_path.fpl, 0, 0x0000ff, false, local_viz_msg_);
+
+    incr = FINE_CURVATURE_SEARCH_RANGE / (NUM_FINE_GRAIN_POSSIBLE_PATHS - 1);
+    curr_curv = curr_coarse_path.curv - (FINE_CURVATURE_SEARCH_RANGE / 2.0);
+
+    for(int j = 0; j < NUM_FINE_GRAIN_POSSIBLE_PATHS; j++){
+      double free_path_l = ComputeFreePathLength(curr_curv);
+      double clearance = ComputeClearance(curr_curv, free_path_l);
+      double goal_dist = ComputeDistanceToGoal(curr_curv, free_path_l);
+      double curr_score = ComputeScore(free_path_l, clearance, goal_dist);
+
+      PossiblePath curr_path;
+      curr_path.curv = curr_curv;
+      curr_path.fpl = free_path_l;
+      fine_scores_queue.Push(curr_path, curr_score);
+
+      visualization::DrawPathOption(curr_path.curv, curr_path.fpl, 0, 0x111111, false, local_viz_msg_);
+
+      curr_curv += incr;
+    }
+  }
+
+  PossiblePath best_path = fine_scores_queue.Pop();
+  target_curvature = best_path.curv;
+  target_free_path_l = best_path.fpl;
+
+  visualization::DrawPathOption(target_curvature, target_free_path_l, 0, 0xff0000, false, local_viz_msg_);
 }
 
 void Navigation::Run() {
