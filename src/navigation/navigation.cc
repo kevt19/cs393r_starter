@@ -59,7 +59,7 @@ AckermannCurvatureDriveMsg drive_msg_;
 // Car Size Constants
 const float CAR_LENGTH = 0.50;
 const float CAR_WIDTH = 0.28;
-const float SAFETY_MARGIN = 0.15;
+const float SAFETY_MARGIN = 0.1;
 const float BASE_TO_FRONT = 0.41;
 const float BACK_TO_BASE = 0.135;
 
@@ -72,7 +72,7 @@ const float CTRL_FREQ = 20.0;
 const float kEpsilon = 1e-5;
 
 // Scoring Weights
-const float w_clearance = 0;
+const float w_clearance = 2;
 const float w_distance_to_goal = 0;
 const float w_free_path_length = 1;
 
@@ -233,6 +233,7 @@ float Navigation::ComputeScore(float free_path_length, float clearance, float di
   return w_free_path_length * free_path_length + w_clearance * clearance + w_distance_to_goal * distance_to_goal;
 }
 
+
 float Navigation::ComputeFreePathLength(double curvature){
   double free_path_l = __DBL_MAX__;
   Vector2f target_point(0,0);
@@ -269,24 +270,48 @@ float Navigation::ComputeFreePathLength(double curvature){
     // Limit of how long the free path length can be before getting further away from the goal
     double fpl_lim = atan(nav_goal_loc_.norm() / abs(radius)) * abs(radius);
     double r1 = abs(radius) - ((CAR_WIDTH / 2) + SAFETY_MARGIN);
-    double r2 = Vector2f(BASE_TO_FRONT + SAFETY_MARGIN, abs(radius) + ((CAR_WIDTH / 2) + SAFETY_MARGIN)).norm();
+    double r2 = Vector2f(BASE_TO_FRONT + SAFETY_MARGIN, abs(radius) - ((CAR_WIDTH / 2) + SAFETY_MARGIN)).norm();
+    double r3 = Vector2f(BASE_TO_FRONT + SAFETY_MARGIN, abs(radius) + ((CAR_WIDTH / 2) + SAFETY_MARGIN)).norm();
+    
 
     // Determine which points are possible obstacles
     vector<Vector2f> possible_obstacles;
     for(auto point : point_cloud_){
+      double r_p = (point - center_of_turn).norm();
       
       double theta = atan2(point.x(), (radius - point.y()));
-      if((point - center_of_turn).norm() >= r1 && (point - center_of_turn).norm() <= r2 && theta > 0){
+      if(r_p >= r1 && r_p <= r3 && theta > 0){
         possible_obstacles.push_back(point);
       };
     }
 
     // Determine which possible obstacle is closest, and find that obstacle's free path length
     for(auto point : possible_obstacles){
-      double theta = atan2(point.x(), (abs(radius) - abs(point.y())));
-      double omega = atan2(BASE_TO_FRONT + SAFETY_MARGIN, (abs(radius) - ((CAR_WIDTH / 2) + SAFETY_MARGIN)));
-      double psi   = theta - omega;
-      double cur_free_path_l = abs(radius) * psi;
+      double r_p = (point - center_of_turn).norm();
+      double cur_free_path_l = -1;
+
+      if(r_p >= r1 && r_p <= r2){
+        float omega = acos(((r_p*r_p) + (radius*radius) - (point.norm()*point.norm()))/(2*r_p*abs(radius)));
+        float f = (r_p - r1)/(r2 - r1);
+        float x = f*(BASE_TO_FRONT + SAFETY_MARGIN);
+        Eigen::Vector2f p_c_vector = {x, CAR_WIDTH/2 + SAFETY_MARGIN};
+        float p_c = p_c_vector.norm();
+        float psi = acos(((r_p*r_p) + (radius*radius) - (p_c*p_c))/(2*r_p*abs(radius)));
+        float theta = omega - psi;
+        cur_free_path_l = std::abs(radius)*(theta);
+      }
+      else if(r_p > r2 && r_p <= r3){
+        float omega = acos(((r_p*r_p) + (radius*radius) - (point.norm()*point.norm()))/(2*r_p*abs(radius)));
+        float y = r_p - (CAR_WIDTH/2 +SAFETY_MARGIN + r2);
+        Vector2f p_c_vector = {BASE_TO_FRONT + SAFETY_MARGIN, y};
+        float p_c = p_c_vector.norm();
+        float psi = acos(((r_p*r_p) + (radius*radius) - (p_c*p_c))/(2*r_p*abs(radius)));
+        float theta = omega - psi;
+        cur_free_path_l = std::abs(radius)*(theta);
+      }
+      else{
+        std::cout << "WHAT" << std::endl;
+      }
 
       // Adjust to limit FPL to closest point of approach to the goal
       if(cur_free_path_l > fpl_lim){
@@ -429,6 +454,9 @@ void Navigation::FindBestPath(double& target_curvature, double& target_free_path
     curr_path.fpl = free_path_l;
     coarse_scores_queue.Push(curr_path, curr_score);
 
+    visualization::DrawPathOption(curr_path.curv, curr_path.fpl, 0, 0x0000ff, false, local_viz_msg_);
+
+
     curr_curv += incr;
   } 
 
@@ -438,7 +466,7 @@ void Navigation::FindBestPath(double& target_curvature, double& target_free_path
   for(int i = 0; i < NUM_BEST_COARSE_PATHS_TO_CONSIDER; i++){
     PossiblePath curr_coarse_path = coarse_scores_queue.Pop();
 
-    visualization::DrawPathOption(curr_coarse_path.curv, curr_coarse_path.fpl, 0, 0x0000ff, false, local_viz_msg_);
+    // visualization::DrawPathOption(curr_coarse_path.curv, curr_coarse_path.fpl, 0, 0x0000ff, false, local_viz_msg_);
 
     incr = FINE_CURVATURE_SEARCH_RANGE / (NUM_FINE_GRAIN_POSSIBLE_PATHS - 1);
     curr_curv = curr_coarse_path.curv - (FINE_CURVATURE_SEARCH_RANGE / 2.0);
@@ -454,7 +482,7 @@ void Navigation::FindBestPath(double& target_curvature, double& target_free_path
       curr_path.fpl = free_path_l;
       fine_scores_queue.Push(curr_path, curr_score);
 
-      visualization::DrawPathOption(curr_path.curv, curr_path.fpl, 0, 0x111111, false, local_viz_msg_);
+      // visualization::DrawPathOption(curr_path.curv, curr_path.fpl, 0, 0x111111, false, local_viz_msg_);
 
       curr_curv += incr;
     }
@@ -464,7 +492,7 @@ void Navigation::FindBestPath(double& target_curvature, double& target_free_path
   target_curvature = best_path.curv;
   target_free_path_l = best_path.fpl;
 
-  visualization::DrawPathOption(target_curvature, target_free_path_l, 0, 0xff0000, false, local_viz_msg_);
+  // visualization::DrawPathOption(target_curvature, target_free_path_l, 0, 0xff0000, false, local_viz_msg_);
 }
 
 void Navigation::Run() {
