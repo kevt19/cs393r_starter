@@ -90,7 +90,7 @@ const float FINE_CURVATURE_SEARCH_RANGE = 0.1;
 const float NUM_FINE_GRAIN_POSSIBLE_PATHS = 11;
 
 // Clearance Parameters
-const float MAX_CLEARANCE = 5;
+const float MAX_CLEARANCE = 3;
 
 } //namespace
 
@@ -234,7 +234,7 @@ float Navigation::ComputeScore(float free_path_length, float clearance, float di
 }
 
 
-float Navigation::ComputeFreePathLength(double curvature){
+float Navigation::ComputeFreePathLength(double curvature, const vector<Vector2f>& cloud){
   double free_path_l = __DBL_MAX__;
   Vector2f target_point(0,0);
 
@@ -242,7 +242,7 @@ float Navigation::ComputeFreePathLength(double curvature){
   if(abs(curvature) < kEpsilon){
     // Determine which points are possible obstacles
     vector<Vector2f> possible_obstacles;
-    for(auto point : point_cloud_){
+    for(auto point : cloud){
       if(abs(point.y()) <= ((CAR_WIDTH / 2) + SAFETY_MARGIN)){
         possible_obstacles.push_back(point);
       }
@@ -276,7 +276,7 @@ float Navigation::ComputeFreePathLength(double curvature){
 
     // Determine which points are possible obstacles
     vector<Vector2f> possible_obstacles;
-    for(auto point : point_cloud_){
+    for(auto point : cloud){
       double r_p = (point - center_of_turn).norm();
       
       double theta = atan2(point.x(), (radius - point.y()));
@@ -337,12 +337,12 @@ float Navigation::ComputeFreePathLength(double curvature){
   return free_path_l;
 }
 
-float Navigation::ComputeDistanceToGoal(double curvature, double free_path_length) {
+float Navigation::ComputeDistanceToGoal(double curvature, double free_path_length, Odometry& odometry) {
   Eigen::Vector2f endpoint;
 
   // Calculate where the car ends up at the end of the free path
   if(abs(curvature) < 0.05){
-    endpoint = Vector2f(0, free_path_length);
+    endpoint = Vector2f(odometry.loc.x(), free_path_length + odometry.loc.y());
   }
   else{
     double radius = 1 / curvature;
@@ -354,7 +354,7 @@ float Navigation::ComputeDistanceToGoal(double curvature, double free_path_lengt
   return (nav_goal_loc_ - endpoint).norm();
 }
 
-float Navigation::ComputeClearance(double curvature, double free_path_length){
+float Navigation::ComputeClearance(double curvature, double free_path_length, const vector<Vector2f>& cloud){
   double clearance = MAX_CLEARANCE;
   Eigen::Vector2f clearance_point(0,0);
 
@@ -362,7 +362,7 @@ float Navigation::ComputeClearance(double curvature, double free_path_length){
   if(abs(curvature) < kEpsilon) {
     // Determine which points will possibly affect clearance
     vector<Vector2f> clearance_points;
-    for(auto point : point_cloud_){
+    for(auto point : cloud){
       if(point.x() > BACK_TO_BASE && point.x() < (free_path_length + BASE_TO_FRONT + SAFETY_MARGIN - 0.1) && abs(point.y()) < MAX_CLEARANCE){
         clearance_points.push_back(point);
       }
@@ -387,7 +387,7 @@ float Navigation::ComputeClearance(double curvature, double free_path_length){
 
     // Determine which points will possibly affect clearance
     vector<Eigen::Vector2f> clearance_points;
-    for(auto point : point_cloud_){
+    for(auto point : cloud){
       double theta_p = atan2(point.x(), radius - point.y());
       double omega = atan2(BASE_TO_FRONT + SAFETY_MARGIN, radius - ((CAR_WIDTH / 2) + SAFETY_MARGIN));
       double psi = free_path_length / abs(radius);
@@ -427,7 +427,7 @@ float Navigation::ComputeClearance(double curvature, double free_path_length){
 
 
 
-void Navigation::FindBestPath(double& target_curvature, double& target_free_path_l){
+void Navigation::FindBestPath(double& target_curvature, double& target_free_path_l, Odometry& odometry, const vector<Vector2f>& cloud){
   float curvature_range = MAX_COARSE_CURVATURE - MIN_COARSE_CURVATURE;
   float incr = curvature_range / (NUM_COARSE_GRAIN_POSSIBLE_PATHS - 1);
   float curr_curv = MIN_COARSE_CURVATURE;
@@ -444,9 +444,9 @@ void Navigation::FindBestPath(double& target_curvature, double& target_free_path
 
   // Iterate over all possible paths, scoring each one
   for(int i = 0; i < NUM_COARSE_GRAIN_POSSIBLE_PATHS; i++){
-    double free_path_l = ComputeFreePathLength(curr_curv);
-    double clearance = ComputeClearance(curr_curv, free_path_l);
-    double goal_dist = ComputeDistanceToGoal(curr_curv, free_path_l);
+    double free_path_l = ComputeFreePathLength(curr_curv, cloud);
+    double clearance = ComputeClearance(curr_curv, free_path_l, cloud);
+    double goal_dist = ComputeDistanceToGoal(curr_curv, free_path_l, odometry);
     double curr_score = ComputeScore(free_path_l, clearance, goal_dist);
 
     PossiblePath curr_path;
@@ -472,9 +472,9 @@ void Navigation::FindBestPath(double& target_curvature, double& target_free_path
     curr_curv = curr_coarse_path.curv - (FINE_CURVATURE_SEARCH_RANGE / 2.0);
 
     for(int j = 0; j < NUM_FINE_GRAIN_POSSIBLE_PATHS; j++){
-      double free_path_l = ComputeFreePathLength(curr_curv);
-      double clearance = ComputeClearance(curr_curv, free_path_l);
-      double goal_dist = ComputeDistanceToGoal(curr_curv, free_path_l);
+      double free_path_l = ComputeFreePathLength(curr_curv, cloud);
+      double clearance = ComputeClearance(curr_curv, free_path_l, cloud);
+      double goal_dist = ComputeDistanceToGoal(curr_curv, free_path_l, odometry);
       double curr_score = ComputeScore(free_path_l, clearance, goal_dist);
 
       PossiblePath curr_path;
@@ -521,11 +521,14 @@ void Navigation::Run() {
   
   // The latest observed point cloud is accessible via "point_cloud_"
 
+  // Compensate for latency
+  Odometry compensated_odometry = CompensateLatencyLoc();
+  vector<Vector2f> compensated_cloud = CompensatePointCloud(point_cloud_, compensated_odometry);
 
   // Eventually, you will have to set the control values to issue drive commands:
   double curvature = 0;
   double free_path_l = 0;
-  FindBestPath(curvature, free_path_l);
+  FindBestPath(curvature, free_path_l, compensated_odometry, compensated_cloud);
 
   drive_msg_.curvature = curvature;
   drive_msg_.velocity = MoveForward(free_path_l);
