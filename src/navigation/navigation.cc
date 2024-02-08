@@ -91,6 +91,7 @@ const float NUM_FINE_GRAIN_POSSIBLE_PATHS = 11;
 
 // Clearance Parameters
 const float MAX_CLEARANCE = 3;
+const float CLEARANCE_CUTOFF = 0.95;
 
 } //namespace
 
@@ -354,7 +355,7 @@ float Navigation::ComputeDistanceToGoal(double curvature, double free_path_lengt
   return (nav_goal_loc_ - endpoint).norm();
 }
 
-float Navigation::ComputeClearance(double curvature, double free_path_length, const vector<Vector2f>& cloud){
+float Navigation::ComputeClearance(double curvature, double free_path_length){
   double clearance = MAX_CLEARANCE;
   Eigen::Vector2f clearance_point(0,0);
 
@@ -362,8 +363,8 @@ float Navigation::ComputeClearance(double curvature, double free_path_length, co
   if(abs(curvature) < kEpsilon) {
     // Determine which points will possibly affect clearance
     vector<Vector2f> clearance_points;
-    for(auto point : cloud){
-      if(point.x() > BACK_TO_BASE && point.x() < (free_path_length + BASE_TO_FRONT + SAFETY_MARGIN - 0.1) && abs(point.y()) < MAX_CLEARANCE){
+    for(auto point : point_cloud_){
+      if(point.x() > BACK_TO_BASE && point.x() < (free_path_length + BASE_TO_FRONT + SAFETY_MARGIN) * CLEARANCE_CUTOFF && abs(point.y()) < MAX_CLEARANCE){
         clearance_points.push_back(point);
       }
     }
@@ -387,11 +388,12 @@ float Navigation::ComputeClearance(double curvature, double free_path_length, co
 
     // Determine which points will possibly affect clearance
     vector<Eigen::Vector2f> clearance_points;
-    for(auto point : cloud){
-      double theta_p = atan2(point.x(), radius - point.y());
-      double omega = atan2(BASE_TO_FRONT + SAFETY_MARGIN, radius - ((CAR_WIDTH / 2) + SAFETY_MARGIN));
+    for(auto point : point_cloud_){
+      double theta_p = atan2(point.x(), abs(radius) - point.y());
+      double omega = atan2(BASE_TO_FRONT + SAFETY_MARGIN, abs(radius) - ((CAR_WIDTH / 2) + SAFETY_MARGIN));
       double psi = free_path_length / abs(radius);
-      double theta_max = omega + psi - 0.05;
+      double theta_max = (omega + psi) * CLEARANCE_CUTOFF;
+
       if(abs((center_of_turn - point).norm() - abs(radius)) < MAX_CLEARANCE && theta_p > 0 && theta_p < theta_max){
         clearance_points.push_back(point);
       };
@@ -420,7 +422,7 @@ float Navigation::ComputeClearance(double curvature, double free_path_length, co
   }
 
   // Draw point used to calculate clearance
-  // visualization::DrawCross(clearance_point, 0.175, 0x00f00f, local_viz_msg_);
+  visualization::DrawCross(clearance_point, 0.15, 0x00f00f, local_viz_msg_);
 
   return clearance;
 }
