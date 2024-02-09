@@ -343,7 +343,12 @@ float Navigation::ComputeDistanceToGoal(double curvature, double free_path_lengt
 
   // Calculate where the car ends up at the end of the free path
   if(abs(curvature) < 0.05){
-    endpoint = Vector2f(odometry.loc.x(), free_path_length + odometry.loc.y());
+    double turning_radius = 1 / curvature;
+    double x_dist = turning_radius * cos(odometry.omega);
+    double y_dist = turning_radius * sin(odometry.omega);
+    double end_x = odometry.loc.x() + x_dist;
+    double end_y = odometry.loc.y() + y_dist;
+    endpoint = Vector2f(end_x, end_y);
   }
   else{
     double radius = 1 / curvature;
@@ -355,7 +360,7 @@ float Navigation::ComputeDistanceToGoal(double curvature, double free_path_lengt
   return (nav_goal_loc_ - endpoint).norm();
 }
 
-float Navigation::ComputeClearance(double curvature, double free_path_length){
+float Navigation::ComputeClearance(double curvature, double free_path_length, const vector<Vector2f>& cloud){
   double clearance = MAX_CLEARANCE;
   Eigen::Vector2f clearance_point(0,0);
 
@@ -363,7 +368,7 @@ float Navigation::ComputeClearance(double curvature, double free_path_length){
   if(abs(curvature) < kEpsilon) {
     // Determine which points will possibly affect clearance
     vector<Vector2f> clearance_points;
-    for(auto point : point_cloud_){
+    for(auto point : cloud){
       if(point.x() > BACK_TO_BASE && point.x() < (free_path_length + BASE_TO_FRONT + SAFETY_MARGIN) * CLEARANCE_CUTOFF && abs(point.y()) < MAX_CLEARANCE){
         clearance_points.push_back(point);
       }
@@ -388,7 +393,7 @@ float Navigation::ComputeClearance(double curvature, double free_path_length){
 
     // Determine which points will possibly affect clearance
     vector<Eigen::Vector2f> clearance_points;
-    for(auto point : point_cloud_){
+    for(auto point : cloud){
       double theta_p = atan2(point.x(), abs(radius) - point.y());
       double omega = atan2(BASE_TO_FRONT + SAFETY_MARGIN, abs(radius) - ((CAR_WIDTH / 2) + SAFETY_MARGIN));
       double psi = free_path_length / abs(radius);
