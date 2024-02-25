@@ -69,48 +69,76 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
                                             float angle_min,
                                             float angle_max,
                                             vector<Vector2f>* scan_ptr) {
-  vector<Vector2f>& scan = *scan_ptr;
   // Compute what the predicted point cloud would be, if the car was at the pose
   // loc, angle, with the sensor characteristics defined by the provided
   // parameters.
   // This is NOT the motion model predict step: it is the prediction of the
   // expected observations, to be used for the update step.
 
+  // // Test variables for robot pose.  I'm also assuming the pose is w.r.t the laser frame NOT base_link.
+  // Vector2f locTest(-32, 21);
+  // float angleTest = 1.5;
+
   // Note: The returned values must be set using the `scan` variable:
+  vector<Vector2f>& scan = *scan_ptr;
   scan.resize(num_ranges);
-  // Fill in the entries of scan using array writes, e.g. scan[i] = ...
-  for (size_t i = 0; i < scan.size(); ++i) {
-    scan[i] = Vector2f(0, 0);
+
+  ////// Create ray line segments
+  const float angle_increment = (abs(angle_max) + abs(angle_min)) / num_ranges;
+  vector<line2f> ray_line_segments;
+  float theta = angle_min;    
+  for (size_t i = 0; i < scan.size(); ++i) 
+  {
+    float px1 = range_min * cos(theta);
+    float py1 = range_min * sin(theta);
+    float px2 = range_max * cos(theta);
+    float py2 = range_max * sin(theta);
+    // Ray line endpoint coordinates with respect to vector map frame
+    float x1 = px1*cos(angle) - py1*sin(angle) + loc.x(); 
+    float y1 = px1*sin(angle) + py1*cos(angle) + loc.y();
+    float x2 = px2*cos(angle) - py2*sin(angle) + loc.x();
+    float y2 = px2*sin(angle) + py2*cos(angle) + loc.y();
+    // Ray line for ith ray
+    line2f ray_line(x1, y1, x2, y2);
+    ray_line_segments.push_back(ray_line);
+    theta += angle_increment;
   }
 
-  // The line segments in the map are stored in the `map_.lines` variable. You
-  // can iterate through them as:
-  for (size_t i = 0; i < map_.lines.size(); ++i) {
-    const line2f map_line = map_.lines[i];
-    // The line2f class has helper functions that will be useful.
-    // You can create a new line segment instance as follows, for :
-    line2f my_line(1, 2, 3, 4); // Line segment from (1,2) to (3.4).
-    // Access the end points using `.p0` and `.p1` members:
-    printf("P0: %f, %f P1: %f,%f\n", 
-           my_line.p0.x(),
-           my_line.p0.y(),
-           my_line.p1.x(),
-           my_line.p1.y());
+  ////// Obtains the closest intersection point for each ray line
+  for (size_t i = 0; i < ray_line_segments.size(); i++)
+  {
+    line2f ray_line = ray_line_segments[i];
+    vector<Vector2f> intersection_list; // Initialize a vector of intersection points
+    //// Iterate through every "map line" in "vector map"
+    for (size_t j = 0; j < map_.lines.size(); ++j) 
+    {
+      const line2f map_line = map_.lines[j];
+      // Creates a vector containing all the intersection points
+      Vector2f intersection_point;
+      if (map_line.Intersection(ray_line, &intersection_point)) 
+      {
+        intersection_list.push_back(intersection_point);
+      }
+    }
 
-    // Check for intersections:
-    bool intersects = map_line.Intersects(my_line);
-    // You can also simultaneously check for intersection, and return the point
-    // of intersection:
-    Vector2f intersection_point; // Return variable
-    intersects = map_line.Intersection(my_line, &intersection_point);
-    if (intersects) {
-      printf("Intersects at %f,%f\n", 
-             intersection_point.x(),
-             intersection_point.y());
-    } else {
-      printf("No intersection\n");
+    //// Finds the intersection point closest to the laser frame and adds it to "scan"
+    scan[i] = Vector2f(0, 0);
+    float smallest = std::numeric_limits<float>::max();
+    for (Vector2f point: intersection_list)
+    {
+      float point_distance = (point - loc).norm();
+      if (point_distance < smallest)
+      {
+        smallest = point_distance;
+        scan[i] = point;
+      }
     }
   }
+  // ////// Prints every point in "scan"
+  // for (size_t k = 0; k < scan.size(); k++)
+  // {
+  //   printf("Point %ld: [%f, %f]\n", k, scan[k].x(), scan[k].y());
+  // }
 }
 
 void ParticleFilter::Update(const vector<float>& ranges,
