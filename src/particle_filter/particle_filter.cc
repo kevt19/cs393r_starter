@@ -75,13 +75,15 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
   // This is NOT the motion model predict step: it is the prediction of the
   // expected observations, to be used for the update step.
 
-  // // Test variables for robot pose.  I'm also assuming the pose is w.r.t the laser frame NOT base_link.
+  // // Test variables for robot pose.
   // Vector2f locTest(-32, 21);
   // float angleTest = 1.5;
 
   // Note: The returned values must be set using the `scan` variable:
   vector<Vector2f>& scan = *scan_ptr;
   scan.resize(num_ranges);
+
+  Vector2f laser_loc = loc + 0.2*Vector2f(cos(angle), sin(angle));
 
   ////// Create ray line segments
   const float angle_increment = (abs(angle_max) + abs(angle_min)) / num_ranges;
@@ -94,10 +96,10 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
     float px2 = range_max * cos(theta);
     float py2 = range_max * sin(theta);
     // Ray line endpoint coordinates with respect to vector map frame
-    float x1 = px1*cos(angle) - py1*sin(angle) + loc.x(); 
-    float y1 = px1*sin(angle) + py1*cos(angle) + loc.y();
-    float x2 = px2*cos(angle) - py2*sin(angle) + loc.x();
-    float y2 = px2*sin(angle) + py2*cos(angle) + loc.y();
+    float x1 = px1*cos(angle) - py1*sin(angle) + laser_loc.x(); 
+    float y1 = px1*sin(angle) + py1*cos(angle) + laser_loc.y();
+    float x2 = px2*cos(angle) - py2*sin(angle) + laser_loc.x();
+    float y2 = px2*sin(angle) + py2*cos(angle) + laser_loc.y();
     // Ray line for ith ray
     line2f ray_line(x1, y1, x2, y2);
     ray_line_segments.push_back(ray_line);
@@ -126,7 +128,7 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
     float smallest = std::numeric_limits<float>::max();
     for (Vector2f point: intersection_list)
     {
-      float point_distance = (point - loc).norm();
+      float point_distance = (point - laser_loc).norm();
       if (point_distance < smallest)
       {
         smallest = point_distance;
