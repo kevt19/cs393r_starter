@@ -115,6 +115,7 @@ void PublishPredictedScan() {
   float robot_angle(0);
   particle_filter_.GetLocation(&robot_loc, &robot_angle);
   vector<Vector2f> predicted_scan;
+  vector<double> predicted_ranges;
   particle_filter_.GetPredictedPointCloud(
       robot_loc,
       robot_angle,
@@ -123,7 +124,8 @@ void PublishPredictedScan() {
       last_laser_msg_.range_max,
       last_laser_msg_.angle_min,
       last_laser_msg_.angle_max,
-      &predicted_scan);
+      &predicted_scan,
+      &predicted_ranges);
   for (const Vector2f& p : predicted_scan) {
     DrawPoint(p, kColor, vis_msg_);
   }
