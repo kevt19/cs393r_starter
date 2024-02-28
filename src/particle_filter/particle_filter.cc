@@ -46,7 +46,7 @@ using std::swap;
 using std::vector;
 using vector_map::VectorMap;
 
-DEFINE_double(num_particles, 50, "Number of particles");
+DEFINE_double(num_particles, 3, "Number of particles");
 
 DEFINE_double(k1, 0.3, "Weighting factor for how much translation affects translation uncertainty");
 DEFINE_double(k2, 0.3, "Weighting factor for how much rotation affects translation uncertainty");
@@ -73,7 +73,8 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
                                             float range_max,
                                             float angle_min,
                                             float angle_max,
-                                            vector<Vector2f>* scan_ptr) {
+                                            vector<Vector2f>* scan_ptr,
+                                            vector<double>* ranges_ptr) {
   // Compute what the predicted point cloud would be, if the car was at the pose
   // loc, angle, with the sensor characteristics defined by the provided
   // parameters.
@@ -87,6 +88,9 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
   // Note: The returned values must be set using the `scan` variable:
   vector<Vector2f>& scan = *scan_ptr;
   scan.resize(num_ranges);
+
+  vector<double>& ranges = *ranges_ptr;
+  ranges.resize(num_ranges);
 
   Vector2f laser_loc = loc + 0.2*Vector2f(cos(angle), sin(angle));
 
@@ -129,8 +133,9 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
     }
 
     //// Finds the intersection point closest to the laser frame and adds it to "scan"
-    scan[i] = Vector2f(0, 0);
-    float smallest = std::numeric_limits<float>::max();
+    scan[i] = Vector2f(range_max, 0);
+    float smallest = range_max;
+    ranges[i] = smallest;
     for (Vector2f point: intersection_list)
     {
       float point_distance = (point - laser_loc).norm();
@@ -138,6 +143,8 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
       {
         smallest = point_distance;
         scan[i] = point;
+
+        ranges[i] = smallest;
       }
     }
   }
@@ -159,6 +166,21 @@ void ParticleFilter::Update(const vector<float>& ranges,
   // observations for each particle, and assign weights to the particles based
   // on the observation likelihood computed by relating the observation to the
   // predicted point cloud.
+
+  float gamma = 1;
+  float stddev = 0.05;
+
+  vector<Vector2f> predicted_scan;
+  vector<double> predicted_ranges;
+
+  GetPredictedPointCloud(p_ptr->loc, p_ptr->angle, ranges.size(), range_min, range_max, angle_min, angle_max, &predicted_scan, &predicted_ranges);
+
+  double log_likelihood = 0;
+  for(size_t i = 0; i < ranges.size(); i++){
+    log_likelihood += gamma * -0.5 * (pow((ranges[i] - predicted_ranges[i]), 2) / (stddev * stddev));
+  }
+
+  p_ptr->weight = 1 / abs(log_likelihood);
 }
 
 void ParticleFilter::Resample() {
@@ -172,11 +194,27 @@ void ParticleFilter::Resample() {
   // After resampling:
   // particles_ = new_particles;
 
-  // You will need to use the uniform random number generator provided. For
-  // example, to generate a random number between 0 and 1:
-  float x = rng_.UniformRandom(0, 1);
-  printf("Random number drawn from uniform distribution between 0 and 1: %f\n",
-         x);
+  vector<Particle> new_particles;
+
+  double sum_of_weights = 0;
+  for(auto particle : particles_){
+    sum_of_weights += particle.weight;
+  }
+
+  for(size_t i = 0; i < particles_.size(); i++){
+    float x = rng_.UniformRandom(0, sum_of_weights);
+
+    float running_w = 0;
+    for(auto particle : particles_){
+      running_w += particle.weight;
+      if(running_w > x){
+        new_particles.push_back(particle);
+        break;
+      }
+    }
+  }
+
+  particles_ = new_particles;
 }
 
 void ParticleFilter::ObserveLaser(const vector<float>& ranges,
@@ -186,6 +224,12 @@ void ParticleFilter::ObserveLaser(const vector<float>& ranges,
                                   float angle_max) {
   // A new laser scan observation is available (in the laser frame)
   // Call the Update and Resample steps as necessary.
+
+  for(auto& particle : particles_){
+    Update(ranges, range_min, range_max, angle_min, angle_max, &particle);
+  }
+
+  Resample();
 }
 
 void ParticleFilter::Predict(const Vector2f& odom_loc,
@@ -259,7 +303,8 @@ void ParticleFilter::Initialize(const string& map_file,
   particles_.clear();
   for (int i = 0; i < FLAGS_num_particles; i++) {
     Particle particle;
-    particle.loc = loc;
+    Vector2f mod_loc(loc[0] + (i/FLAGS_num_particles), loc[1]);
+    particle.loc = mod_loc;
     particle.angle = angle;
     particle.weight = 0;
     particles_.push_back(particle);
@@ -276,8 +321,16 @@ void ParticleFilter::GetLocation(Eigen::Vector2f* loc_ptr,
   // Compute the best estimate of the robot's location based on the current set
   // of particles. The computed values must be set to the `loc` and `angle`
   // variables to return them. Modify the following assignments:
-  loc = Vector2f(0, 0);
-  angle = 0;
+  Particle best_particle = particles_[0];
+  double best_weight = 0;
+  for(auto particle : particles_){
+    if(particle.weight > best_weight){
+      best_particle = particle;
+      best_weight = particle.weight;
+    }
+  }
+  loc = best_particle.loc;
+  angle = best_particle.angle;
 }
 
 
