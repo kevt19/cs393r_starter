@@ -74,9 +74,6 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
                                             float angle_min,
                                             float angle_max,
                                             vector<Vector2f>* scan_ptr) {
-  // // Test variables for robot pose.
-  // Vector2f locTest(-32, 21);
-  // float angleTest = 1.5;
 
   vector<Vector2f>& scan = *scan_ptr;
   scan.resize(num_ranges);
@@ -107,8 +104,6 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
       const line2f map_line = map_.lines[j];
       bool intersects = map_line.Intersects(ray_line);
 
-
-
       ////// Obtains the closest intersection point for each ray line
       if (intersects)
       {
@@ -132,18 +127,14 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
           }
         }
       }
-
       else
       {
         scan[i] = Vector2f(x2, y2);  // If there is no collison set it to the point from the maximum range (range_max)
       }
-
-
     }
 
     theta += angle_increment;
   }
-
   // ////// Prints every point in "scan"
   // for (size_t k = 0; k < scan.size(); k++)
   // {
@@ -157,40 +148,46 @@ void ParticleFilter::Update(const vector<float>& ranges,
                             float angle_min,
                             float angle_max,
                             Particle* p_ptr) {
+  // Observed ranges from sensor scan
+  vector<float> observed_range = ranges;
+  int num_ranges = ranges.size();
 
-  // ////// "ranges" using the parameters above
-  // // TODO //
-  // vector<Vector2f> observed_ranges;
+  // Particle location (base_link wrt map_frame)
+  Vector2f loc = p_ptr->loc;
 
-  // // Particle location (base_link)
-  // Vector2f loc = p_ptr.loc;
+  // Particle angle (WRT map frame)
+  float angle = p_ptr->angle;
 
-  // // Particle angle (WRT map frame)
-  // float angle = p_ptr.angle;
+  // Particle laser location (laser_frame wrt map_frame)
+  Vector2f laser_loc = loc + 0.2*Vector2f(cos(angle), sin(angle));
 
-  // // Initialize Particle Weight
-  // double weight = p_ptr.weight;
+  // Initialize Particle Weight
+  double weight = p_ptr->weight;
 
-  // ////// Weight for particle i, (weight_i), is equal to P(s_i_t ,..., s_n_t | x_t)
-  // // sensor noise?
-  // // TODO //
-  // float sigma_s;
+  // Sensor noise (To be tuned, increasing this makes it more robust, according to lecture)
+  float sigma_s = 0.05; 
 
-  // // Constant arising from sensor noise
-  // float K = 1/(sigma_s * sqrt(2*M_PI)); // This might have to be called putside this function when we sum all the particle weights
+  // Normalization constant
+  float k = 1/(sigma_s * sqrt(2*M_PI)); // This might have to be called putside this function when we sum all the particle weights
 
-  // // gamma accounts for ray correlation
-  // // TODO // 
-  // float gamma;
+  // gamma accounts for ray correlation
+  float gamma = 0.5; // [1/n, 1] ---> n=1081 ---> [.00092, 1]
+  
+  ////// Initialize the predicted pointcloud from GetPredictedPointCloud()
+  vector<Vector2f> predicted_pointcloud;
+  GetPredictedPointCloud(loc, angle, num_ranges, range_min, range_max, angle_min, angle_max, &predicted_pointcloud);
+  float probabilities_sum = 0;
+  for (int i = 0; i < num_ranges; i++)
+  {
+    float predicted_range = (laser_loc - predicted_pointcloud[i]).norm();
+    float p = pow( ((-1/2) * (pow(observed_range[i] - predicted_range, 2) / pow(sigma_s, 2)) ), gamma);
+    probabilities_sum += p;
+  }
 
-  // // TODO // 
-  // ////// Initialize the predicted pointcloud from GetPredictedPointCloud()
-  // vector<Vector2f> predicted_pointcloud = GetPredictedPointCloud(); // Pass on particle location and other parameters
+  weight = k * probabilities_sum;
 
-  // // TODO //
-  // vector<float> predicted_ranges; // I just need the ranges for each predicted pointcloud.  Convert predicted_pointcloud to predicted_ranges 
+  printf("Weight = %f\n", weight);
 
-  // float weight = pow( ((-1/2) * (pow(observed_ranges - predicted_ranges, 2) / pow(sigma_s, 2)) ), gamma);
 }
 
 void ParticleFilter::Resample() {
