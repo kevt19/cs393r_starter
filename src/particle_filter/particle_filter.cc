@@ -46,7 +46,7 @@ using std::swap;
 using std::vector;
 using vector_map::VectorMap;
 
-DEFINE_double(num_particles, 3, "Number of particles");
+DEFINE_double(num_particles, 50, "Number of particles");
 
 DEFINE_double(k1, 0.3, "Weighting factor for how much translation affects translation uncertainty");
 DEFINE_double(k2, 0.3, "Weighting factor for how much rotation affects translation uncertainty");
@@ -81,7 +81,11 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
   // This is NOT the motion model predict step: it is the prediction of the
   // expected observations, to be used for the update step.
 
+  // // Test variables for robot pose.
+  // Vector2f locTest(-32, 21);
+  // float angleTest = 1.5;
 
+  // Note: The returned values must be set using the `scan` variable:
   vector<Vector2f>& scan = *scan_ptr;
   scan.resize(num_ranges);
 
@@ -92,6 +96,7 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
 
   ////// Create ray line segments
   const float angle_increment = (abs(angle_max) + abs(angle_min)) / num_ranges;
+  vector<line2f> ray_line_segments;
   float theta = angle_min;    
   for (size_t i = 0; i < scan.size(); ++i) 
   {
@@ -106,36 +111,24 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
     float y2 = px2*sin(angle) + py2*cos(angle) + laser_loc.y();
     // Ray line for ith ray
     line2f ray_line(x1, y1, x2, y2);
+    ray_line_segments.push_back(ray_line);
+    theta += angle_increment;
+  }
 
+  ////// Obtains the closest intersection point for each ray line
+  for (size_t i = 0; i < ray_line_segments.size(); i++)
+  {
+    line2f ray_line = ray_line_segments[i];
+    vector<Vector2f> intersection_list; // Initialize a vector of intersection points
     //// Iterate through every "map line" in "vector map"
     for (size_t j = 0; j < map_.lines.size(); ++j) 
     {
-      Vector2f intersection_point;
       const line2f map_line = map_.lines[j];
-      bool intersects = map_line.Intersects(ray_line);
-
-      ////// Obtains the closest intersection point for each ray line
-      if (intersects)
+      // Creates a vector containing all the intersection points
+      Vector2f intersection_point;
+      if (map_line.Intersection(ray_line, &intersection_point)) 
       {
-        // Creates a vector containing all the intersection points
-        vector<Vector2f> intersection_list; // Initialize a vector of intersection points
-        if (map_line.Intersection(ray_line, &intersection_point)) 
-        {
-          intersection_list.push_back(intersection_point);
-        }
-
-        //// Finds the intersection point closest to the laser frame and adds it to "scan"
-        scan[i] = Vector2f(0, 0);
-        float smallest = std::numeric_limits<float>::max();
-        for (Vector2f point: intersection_list)
-        {
-          float point_distance = (point - laser_loc).norm();
-          if (point_distance < smallest)
-          {
-            smallest = point_distance;
-            scan[i] = point;
-          }
-        }
+        intersection_list.push_back(intersection_point);
       }
     }
 
@@ -152,19 +145,9 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
         scan[i] = point;
 
         ranges[i] = smallest;
-      else
-      {
-        scan[i] = Vector2f(x2, y2);  // If there is no collison set it to the point from the maximum range (range_max)
       }
     }
-
-    theta += angle_increment;
   }
-  // ////// Prints every point in "scan"
-  // for (size_t k = 0; k < scan.size(); k++)
-  // {
-  //   printf("Point %ld: [%f, %f]\n", k, scan[k].x(), scan[k].y());
-  // }
 }
 
 void ParticleFilter::Update(const vector<float>& ranges,
@@ -315,8 +298,7 @@ void ParticleFilter::Initialize(const string& map_file,
   particles_.clear();
   for (int i = 0; i < FLAGS_num_particles; i++) {
     Particle particle;
-    Vector2f mod_loc(loc[0] + (i/FLAGS_num_particles), loc[1]);
-    particle.loc = mod_loc;
+    particle.loc = loc;
     particle.angle = angle;
     particle.weight = 0;
     particles_.push_back(particle);
