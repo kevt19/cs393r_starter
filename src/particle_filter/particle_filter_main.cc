@@ -68,6 +68,7 @@ using visualization::DrawParticle;
 // Create command line arguements
 DEFINE_string(laser_topic, "/scan", "Name of ROS topic for LIDAR data");
 DEFINE_string(odom_topic, "/odom", "Name of ROS topic for odometry data");
+DEFINE_string(reference_topic, "/reference_localization", "Name of ROS topic for reference localization data");
 DEFINE_string(init_topic,
               "/set_pose",
               "Name of ROS topic for initialization");
@@ -92,6 +93,12 @@ sensor_msgs::LaserScan last_laser_msg_;
 
 vector<Vector2f> trajectory_points_;
 string current_map_;
+
+double loc_score_ = 0;
+double loc_score_n_ = 1;
+double angle_score_ = 0;
+double angle_score_n_ = 1;
+bool scoring_initialized_ = false;
 
 void InitializeMsgs() {
   std_msgs::Header header;
@@ -214,6 +221,12 @@ string GetMapFileFromName(const string& map) {
 }
 
 void InitCallback(const amrl_msgs::Localization2DMsg& msg) {
+  scoring_initialized_ = true;
+  loc_score_ = 0;
+  loc_score_n_ = 1;
+  angle_score_ = 0;
+  angle_score_n_ = 1;
+
   const Vector2f init_loc(msg.pose.x, msg.pose.y);
   const float init_angle = msg.pose.theta;
   current_map_ = msg.map;
@@ -225,6 +238,31 @@ void InitCallback(const amrl_msgs::Localization2DMsg& msg) {
          RadToDeg(init_angle));
   particle_filter_.Initialize(map_file, init_loc, init_angle);
   trajectory_points_.clear();
+}
+
+void ReferenceCallback(const amrl_msgs::Localization2DMsg& msg) {
+  if(!scoring_initialized_){
+    return;
+  }
+
+  Vector2f robot_loc(0, 0);
+  float robot_angle(0);
+  particle_filter_.GetLocation(&robot_loc, &robot_angle);
+
+  cout << robot_loc[0] << " " << robot_loc[1] << " " << robot_angle << endl;
+  cout << msg.pose << endl << endl;
+
+  double euclidean_distance = sqrt(pow(msg.pose.x - robot_loc[0], 2) + pow(msg.pose.y - robot_loc[1], 2));
+  double angular_diff = std::min(abs(msg.pose.theta - robot_angle), 2 * 3.14159f - abs(msg.pose.theta - robot_angle));
+
+  loc_score_ = loc_score_ + (euclidean_distance - loc_score_) / loc_score_n_;
+  loc_score_n_ += 1;
+
+  angle_score_ = angle_score_ + (angular_diff - angle_score_) / angle_score_n_;
+  angle_score_n_ += 1;
+
+  cout << loc_score_ << endl;
+  cout << angle_score_ << endl << endl;
 }
 
 void ProcessLive(ros::NodeHandle* n) {
@@ -240,6 +278,10 @@ void ProcessLive(ros::NodeHandle* n) {
       FLAGS_odom_topic.c_str(),
       1,
       OdometryCallback);
+  ros::Subscriber reference_sub = n->subscribe(
+      FLAGS_reference_topic.c_str(),
+      1,
+      ReferenceCallback);
   particle_filter_.Initialize(
       GetMapFileFromName(current_map_),
       Vector2f(CONFIG_init_x_, CONFIG_init_x_),
