@@ -54,7 +54,9 @@ DEFINE_double(k3, 0.15, "Weighting factor for how much translation affects rotat
 DEFINE_double(k4, 0.15, "Weighting factor for how much rotation affects rotation uncertainty");
 
 DEFINE_double(stddev, 0.05, "LiDAR Sensor Noise");
-DEFINE_double(gamma, 1, "Ray correlation [1/num_particles,1]");
+DEFINE_double(gamma, 1.0, "Ray correlation [1/num_particles,1]");
+DEFINE_double(d_long, 1, "Used in Observation Likelihood Model, has to be higher than d_short");
+DEFINE_double(d_short, 0.2, "Used in Observation Likelihood Model, around .2m - .5m");
 
 namespace particle_filter {
 
@@ -79,6 +81,7 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
                                             vector<Vector2f>* scan_ptr,
                                             vector<double>* ranges_ptr) {
 
+  // Note: The returned values must be set using the `scan` variable:
   vector<Vector2f>& scan = *scan_ptr;
   scan.resize(num_ranges);
 
@@ -86,8 +89,10 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
   ranges.resize(num_ranges);
 
   Vector2f laser_loc = loc + 0.2*Vector2f(cos(angle), sin(angle));
+
   ////// Create ray line segments
   const float angle_increment = (abs(angle_max) + abs(angle_min)) / num_ranges;
+  vector<line2f> ray_line_segments;
   float theta = angle_min;    
   for (size_t i = 0; i < scan.size(); ++i) 
   {
@@ -102,45 +107,42 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
     float y2 = px2*sin(angle) + py2*cos(angle) + laser_loc.y();
     // Ray line for ith ray
     line2f ray_line(x1, y1, x2, y2);
+    ray_line_segments.push_back(ray_line);
+    theta += angle_increment;
+  }
+
+  ////// Obtains the closest intersection point for each ray line
+  for (size_t i = 0; i < ray_line_segments.size(); i++)
+  {
+    line2f ray_line = ray_line_segments[i];
+    vector<Vector2f> intersection_list; // Initialize a vector of intersection points
     //// Iterate through every "map line" in "vector map"
     for (size_t j = 0; j < map_.lines.size(); ++j) 
     {
-      Vector2f intersection_point;
       const line2f map_line = map_.lines[j];
-      bool intersects = map_line.Intersects(ray_line);
-
-      ////// Obtains the closest intersection point for each ray line
-      if (intersects)
+      // Creates a vector containing all the intersection points
+      Vector2f intersection_point;
+      if (map_line.Intersection(ray_line, &intersection_point)) 
       {
-        // Creates a vector containing all the intersection points
-        vector<Vector2f> intersection_list; // Initialize a vector of intersection points
-        if (map_line.Intersection(ray_line, &intersection_point)) 
-        {
-          intersection_list.push_back(intersection_point);
-        }
-        //// Finds the intersection point closest to the laser frame and adds it to "scan"
-        scan[i] = Vector2f(0, 0);
-        float smallest = std::numeric_limits<float>::max();
-        ranges[i] = smallest;
-        for (Vector2f point: intersection_list)
-        {
-          float point_distance = (point - laser_loc).norm();
-          if (point_distance < smallest)
-          {
-            smallest = point_distance;
-            scan[i] = point;
-
-            ranges[i] = smallest;
-          }
-        }
-      }
-
-      else
-      {
-        scan[i] = Vector2f(x2, y2);  // If there is no collison set it to the point from the maximum range (range_max)
+        intersection_list.push_back(intersection_point);
       }
     }
-    theta += angle_increment;
+
+    //// Finds the intersection point closest to the laser frame and adds it to "scan"
+    scan[i] = Vector2f(range_max, 0);
+    float smallest = range_max;
+    ranges[i] = smallest;
+    for (Vector2f point: intersection_list)
+    {
+      float point_distance = (point - laser_loc).norm();
+      if (point_distance < smallest)
+      {
+        smallest = point_distance;
+        scan[i] = point;
+
+        ranges[i] = smallest;
+      }
+    }
   }
 }
 
@@ -150,22 +152,32 @@ void ParticleFilter::Update(const vector<float>& ranges,
                             float angle_min,
                             float angle_max,
                             Particle* p_ptr) {
-  // Normalization constant
-  float k = 1/(FLAGS_stddev * sqrt(2*M_PI)); // This might have to be called putside this function when we sum all the particle weights
-
   ////// Initialize the predicted scan from GetPredictedPointCloud()
   vector<Vector2f> predicted_scan;
   vector<double> predicted_ranges;
-
   GetPredictedPointCloud(p_ptr->loc, p_ptr->angle, ranges.size(), range_min, range_max, angle_min, angle_max, &predicted_scan, &predicted_ranges);
   double log_likelihood = 0;
   for (size_t i = 0; i < ranges.size(); i++)
   {
-    log_likelihood =  (-gamma/2) * (pow(ranges[i] - predicted_ranges[i], 2) / pow(FLAGS_stddev, 2));
+    // if (ranges[i] < range_min && ranges[i] > range_max){
+    //   log_likelihood += 0;
+    // }
+
+    // else if (ranges[i] < predicted_ranges[i] - FLAGS_d_short){
+    //   log_likelihood += exp(-(pow(FLAGS_d_short,2)/pow(FLAGS_stddev,2)));
+    // }
+
+    // else if (ranges[i] > predicted_ranges[i] + FLAGS_d_long){
+    //   log_likelihood += exp(-(pow(FLAGS_d_long,2))/(pow(FLAGS_stddev,2)));
+    // }
+
+    // else{
+    //   log_likelihood += exp(-(pow((ranges[i] - predicted_ranges[i]),2))/(pow(FLAGS_stddev,2)));
+    // }
+
+    log_likelihood +=  FLAGS_gamma * (-0.5) * (pow(ranges[i] - predicted_ranges[i], 2) / pow(FLAGS_stddev, 2));  // Simple Version
   }
-
   p_ptr->weight = 1 / abs(log_likelihood);
-
 }
 
 void ParticleFilter::Resample() {
