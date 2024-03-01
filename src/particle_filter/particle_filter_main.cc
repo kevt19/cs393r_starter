@@ -249,8 +249,8 @@ void ReferenceCallback(const amrl_msgs::Localization2DMsg& msg) {
   float robot_angle(0);
   particle_filter_.GetLocation(&robot_loc, &robot_angle);
 
-  cout << robot_loc[0] << " " << robot_loc[1] << " " << robot_angle << endl;
-  cout << msg.pose << endl << endl;
+  // cout << robot_loc[0] << " " << robot_loc[1] << " " << robot_angle << endl;
+  // cout << msg.pose << endl << endl;
 
   double euclidean_distance = sqrt(pow(msg.pose.x - robot_loc[0], 2) + pow(msg.pose.y - robot_loc[1], 2));
   double angular_diff = std::min(abs(msg.pose.theta - robot_angle), 2 * 3.14159f - abs(msg.pose.theta - robot_angle));
@@ -261,8 +261,8 @@ void ReferenceCallback(const amrl_msgs::Localization2DMsg& msg) {
   angle_score_ = angle_score_ + (angular_diff - angle_score_) / angle_score_n_;
   angle_score_n_ += 1;
 
-  cout << loc_score_ << endl;
-  cout << angle_score_ << endl << endl;
+  cout << "loc score: " << loc_score_ << endl;
+  cout << "angle score: " << angle_score_ << endl << endl;
 }
 
 void ProcessLive(ros::NodeHandle* n) {

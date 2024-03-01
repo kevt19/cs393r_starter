@@ -53,9 +53,9 @@ DEFINE_double(k2, 0.3, "Weighting factor for how much rotation affects translati
 DEFINE_double(k3, 0.15, "Weighting factor for how much translation affects rotation uncertainty");
 DEFINE_double(k4, 0.15, "Weighting factor for how much rotation affects rotation uncertainty");
 
-DEFINE_double(stddev, 0.05, "LiDAR Sensor Noise");
-DEFINE_double(gamma, 1.0, "Ray correlation [1/num_particles,1]");
-DEFINE_double(d_long, 1, "Used in Observation Likelihood Model, has to be higher than d_short");
+DEFINE_double(stddev, 0.05, "LiDAR Sensor Noise, 0.05m - 1m");
+DEFINE_double(gamma, 0.5, "Ray correlation [1/num_particles,1]");
+DEFINE_double(d_long, 1, "Used in Observation Likelihood Model, has to be higher than d_short, 1m - 1.5m");
 DEFINE_double(d_short, 0.2, "Used in Observation Likelihood Model, around .2m - .5m");
 
 namespace particle_filter {
@@ -159,23 +159,23 @@ void ParticleFilter::Update(const vector<float>& ranges,
   double log_likelihood = 0;
   for (size_t i = 0; i < ranges.size(); i++)
   {
-    // if (ranges[i] < range_min && ranges[i] > range_max){
-    //   log_likelihood += 0;
-    // }
+    if (ranges[i] < range_min && ranges[i] > range_max){
+      log_likelihood += 0;
+    }
 
-    // else if (ranges[i] < predicted_ranges[i] - FLAGS_d_short){
-    //   log_likelihood += exp(-(pow(FLAGS_d_short,2)/pow(FLAGS_stddev,2)));
-    // }
+    else if (ranges[i] < predicted_ranges[i] - FLAGS_d_short){
+      log_likelihood += -(pow(FLAGS_d_short,2)/pow(FLAGS_stddev,2));
+    }
 
-    // else if (ranges[i] > predicted_ranges[i] + FLAGS_d_long){
-    //   log_likelihood += exp(-(pow(FLAGS_d_long,2))/(pow(FLAGS_stddev,2)));
-    // }
+    else if (ranges[i] > predicted_ranges[i] + FLAGS_d_long){
+      log_likelihood += -(pow(FLAGS_d_long,2))/(pow(FLAGS_stddev,2));
+    }
 
-    // else{
-    //   log_likelihood += exp(-(pow((ranges[i] - predicted_ranges[i]),2))/(pow(FLAGS_stddev,2)));
-    // }
+    else{
+      log_likelihood += FLAGS_gamma * -(pow((ranges[i] - predicted_ranges[i]),2))/(pow(FLAGS_stddev,2));
+    }
 
-    log_likelihood +=  FLAGS_gamma * (-0.5) * (pow(ranges[i] - predicted_ranges[i], 2) / pow(FLAGS_stddev, 2));  // Simple Version
+    // log_likelihood +=  FLAGS_gamma * (-0.5) * (pow(ranges[i] - predicted_ranges[i], 2) / pow(FLAGS_stddev, 2));  // Simple Version
   }
   p_ptr->weight = 1 / abs(log_likelihood);
 }
