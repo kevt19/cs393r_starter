@@ -53,7 +53,7 @@ DEFINE_double(k2, 0.3, "Weighting factor for how much rotation affects translati
 DEFINE_double(k3, 0.15, "Weighting factor for how much translation affects rotation uncertainty");
 DEFINE_double(k4, 0.15, "Weighting factor for how much rotation affects rotation uncertainty");
 
-DEFINE_double(stddev, 0.05, "LiDAR Sensor Noise, 0.05m - 1m");
+DEFINE_double(stddev, 0.3, "LiDAR Sensor Noise, 0.05m - 1m");
 DEFINE_double(gamma, 0.5, "Ray correlation [1/num_particles,1]");
 DEFINE_double(d_long, 1, "Used in Observation Likelihood Model, has to be higher than d_short, 1m - 1.5m");
 DEFINE_double(d_short, 0.2, "Used in Observation Likelihood Model, around .2m - .5m");
