@@ -53,8 +53,8 @@ DEFINE_double(k2, 0.3, "Weighting factor for how much rotation affects translati
 DEFINE_double(k3, 0.15, "Weighting factor for how much translation affects rotation uncertainty");
 DEFINE_double(k4, 0.15, "Weighting factor for how much rotation affects rotation uncertainty");
 
-DEFINE_double(stddev, 0.3, "LiDAR Sensor Noise, 0.05m - 1m");
-DEFINE_double(gamma, 0.5, "Ray correlation [1/num_particles,1]");
+DEFINE_double(stddev, 0.05, "LiDAR Sensor Noise, 0.05m - 1m");
+DEFINE_double(gamma, 0.1, "Ray correlation [1/num_particles,1]");
 DEFINE_double(d_long, 1, "Used in Observation Likelihood Model, has to be higher than d_short, 1m - 1.5m");
 DEFINE_double(d_short, 0.2, "Used in Observation Likelihood Model, around .2m - .5m");
 
@@ -73,7 +73,7 @@ void ParticleFilter::GetParticles(vector<Particle>* particles) const {
 
 void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
                                             const float angle,
-                                            int num_ranges,
+                                            int num_ranges_full,
                                             float range_min,
                                             float range_max,
                                             float angle_min,
@@ -81,7 +81,7 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
                                             vector<Vector2f>* scan_ptr,
                                             vector<double>* ranges_ptr) {
 
-  // Note: The returned values must be set using the `scan` variable:
+  float num_ranges = num_ranges_full/23; // Creates 47 points out of 1081
   vector<Vector2f>& scan = *scan_ptr;
   scan.resize(num_ranges);
 
@@ -157,7 +157,7 @@ void ParticleFilter::Update(const vector<float>& ranges,
   vector<double> predicted_ranges;
   GetPredictedPointCloud(p_ptr->loc, p_ptr->angle, ranges.size(), range_min, range_max, angle_min, angle_max, &predicted_scan, &predicted_ranges);
   double log_likelihood = 0;
-  for (size_t i = 0; i < ranges.size(); i++)
+  for (size_t i = 0; i < ranges.size(); i += 23)
   {
     if (ranges[i] < range_min && ranges[i] > range_max){
       log_likelihood += 0;
