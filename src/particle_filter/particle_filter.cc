@@ -81,7 +81,7 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
                                             vector<Vector2f>* scan_ptr,
                                             vector<double>* ranges_ptr) {
 
-  float num_ranges = num_ranges_full/23; // Creates 47 points out of 1081
+  float num_ranges = num_ranges_full/47; // Creates 23 points out of 1081
   vector<Vector2f>& scan = *scan_ptr;
   scan.resize(num_ranges);
 
@@ -157,7 +157,7 @@ void ParticleFilter::Update(const vector<float>& ranges,
   vector<double> predicted_ranges;
   GetPredictedPointCloud(p_ptr->loc, p_ptr->angle, ranges.size(), range_min, range_max, angle_min, angle_max, &predicted_scan, &predicted_ranges);
   double log_likelihood = 0;
-  for (size_t i = 0; i < ranges.size(); i += 23)
+  for (size_t i = 0; i < ranges.size(); i += 47)
   {
     if (ranges[i] < range_min && ranges[i] > range_max){
       log_likelihood += 0;
