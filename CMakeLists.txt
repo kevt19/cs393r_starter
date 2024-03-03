@@ -16,6 +16,9 @@ ELSEIF(${CMAKE_BUILD_TYPE} MATCHES "Debug")
   SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -g")
 ENDIF()
 
+find_package(CUDA  REQUIRED)
+include_directories("${CUDA_INCLUDE_DIRS}")
+
 INCLUDE($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
 ROSBUILD_INIT()
 SET(ROS_BUILD_STATIC_LIBS true)
@@ -48,7 +51,7 @@ TARGET_LINK_LIBRARIES(slam shared_library ${libs})
 ROSBUILD_ADD_EXECUTABLE(particle_filter
                         src/particle_filter/particle_filter_main.cc
                         src/particle_filter/particle_filter.cc)
-TARGET_LINK_LIBRARIES(particle_filter shared_library ${libs})
+TARGET_LINK_LIBRARIES(particle_filter shared_library ${libs} ${CUDA_LIBRARIES})
 
 ROSBUILD_ADD_EXECUTABLE(navigation
                         src/navigation/navigation_main.cc

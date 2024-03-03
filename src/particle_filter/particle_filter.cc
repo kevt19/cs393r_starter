@@ -37,6 +37,9 @@
 
 #include "vector_map/vector_map.h"
 
+#include <cuda_runtime.h>
+#include <device_launch_parameters.h>
+
 using Eigen::Vector2f;
 using Eigen::Vector2i;
 using geometry::line2f;
@@ -94,8 +97,9 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
   ////// Create ray line segments
   const float angle_increment = (abs(angle_max) + abs(angle_min)) / num_ranges;
   vector<line2f> ray_line_segments;
+  vector<float> temp;
   float theta = angle_min;    
-  create_ray_line_segments<<1, 2000>>(laser_loc, range_min, angle, angle_increment, ray_line_segments);
+  create_ray_line_segments<<<1, 2000>>>(laser_loc[0], laser_loc[1], range_min, angle, angle_increment, temp);
   for (size_t i = 0; i < scan.size(); ++i) 
   {
     float px1 = range_min * cos(theta);
