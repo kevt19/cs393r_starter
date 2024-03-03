@@ -251,6 +251,11 @@ void ParticleFilter::Predict(const Vector2f& odom_loc,
   float delta_theta_baselink = odom_angle - prev_odom_angle_;
   float map_angle = prev_map_angle_ + delta_theta_baselink;
 
+  // Possible anomolous odometry reading, ignore it
+  if(delta_baselink.norm() > 0.5 || abs(delta_theta_baselink) > (3.14159 / 2.0)){
+    return;
+  }
+
   // Calculate change in pose in map frame
   float delta_x = map_loc[0] - prev_map_loc_[0];
   float delta_y = map_loc[1] - prev_map_loc_[1];
