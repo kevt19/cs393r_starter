@@ -1,5 +1,5 @@
-PROJECT(reference_car)
-CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
+PROJECT(reference_car LANGUAGES CUDA CXX)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.10)
 
 MESSAGE(STATUS "Compiling Reference Car Localization + Navigation")
 MESSAGE(STATUS "Using compiler: ${CMAKE_CXX_COMPILER}")
@@ -32,7 +32,8 @@ SET(libs roslib roscpp rosbag glog gflags amrl-shared-lib boost_system lua5.1
 
 ADD_LIBRARY(shared_library
             src/visualization/visualization.cc
-            src/vector_map/vector_map.cc)
+            src/vector_map/vector_map.cc
+            src/particle_filter/particle_filter.cu)
 
 ADD_SUBDIRECTORY(src/shared)
 INCLUDE_DIRECTORIES(src/shared)

@@ -33,6 +33,7 @@
 
 #include "config_reader/config_reader.h"
 #include "particle_filter.h"
+#include "particle_filter.cuh"
 
 #include "vector_map/vector_map.h"
 
@@ -94,6 +95,7 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
   const float angle_increment = (abs(angle_max) + abs(angle_min)) / num_ranges;
   vector<line2f> ray_line_segments;
   float theta = angle_min;    
+  create_ray_line_segments<<1, 2000>>(laser_loc, range_min, angle, angle_increment, ray_line_segments);
   for (size_t i = 0; i < scan.size(); ++i) 
   {
     float px1 = range_min * cos(theta);
