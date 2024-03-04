@@ -159,7 +159,7 @@ void ParticleFilter::Update(const vector<float>& ranges,
   double log_likelihood = 0;
   for (size_t i = 0; i < ranges.size(); i += 47)
   {
-    if (ranges[i] < range_min && ranges[i] > range_max){
+    if (ranges[i] < range_min || ranges[i] > range_max){
       log_likelihood += 0;
     }
 
