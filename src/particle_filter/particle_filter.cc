@@ -157,23 +157,26 @@ void ParticleFilter::Update(const vector<float>& ranges,
   vector<double> predicted_ranges;
   GetPredictedPointCloud(p_ptr->loc, p_ptr->angle, ranges.size(), range_min, range_max, angle_min, angle_max, &predicted_scan, &predicted_ranges);
   double log_likelihood = 0;
+
+  int k = 0;
   for (size_t i = 0; i < ranges.size(); i += 23)
   {
     if (ranges[i] < range_min || ranges[i] > range_max){
       log_likelihood += 0;
     }
 
-    else if (ranges[i] < predicted_ranges[i] - FLAGS_d_short){
+    else if (ranges[i] < predicted_ranges[k] - FLAGS_d_short){
       log_likelihood += -(pow(FLAGS_d_short,2)/pow(FLAGS_stddev,2));
     }
 
-    else if (ranges[i] > predicted_ranges[i] + FLAGS_d_long){
+    else if (ranges[i] > predicted_ranges[k] + FLAGS_d_long){
       log_likelihood += -(pow(FLAGS_d_long,2))/(pow(FLAGS_stddev,2));
     }
 
     else{
-      log_likelihood += FLAGS_gamma * -(pow((ranges[i] - predicted_ranges[i]),2))/(pow(FLAGS_stddev,2));
+      log_likelihood += FLAGS_gamma * -(pow((ranges[i] - predicted_ranges[k]),2))/(pow(FLAGS_stddev,2));
     }
+    k += 1;
 
     // log_likelihood +=  FLAGS_gamma * (-0.5) * (pow(ranges[i] - predicted_ranges[i], 2) / pow(FLAGS_stddev, 2));  // Simple Version
   }
