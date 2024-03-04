@@ -58,6 +58,13 @@ DEFINE_double(gamma, 0.1, "Ray correlation [1/num_particles,1]");
 DEFINE_double(d_long, 1, "Used in Observation Likelihood Model, has to be higher than d_short, 1m - 1.5m");
 DEFINE_double(d_short, 0.2, "Used in Observation Likelihood Model, around .2m - .5m");
 
+DEFINE_double(std_dev_init_t, 0.33, "Std deviation of noise added to initial points' location");
+DEFINE_double(std_dev_init_r, 0.2, "Std deviation of noise added to initial points' rotation");
+
+DEFINE_double(pct_best_particles, 0.1, "Percentage of particles to consider when getting location of car");
+
+DEFINE_double(min_dist_for_update, 0.2, "Distance the car must travel before an update and resample can occur");
+
 namespace particle_filter {
 
 config_reader::ConfigReader config_reader_({"config/particle_filter.lua"});
@@ -65,7 +72,8 @@ config_reader::ConfigReader config_reader_({"config/particle_filter.lua"});
 ParticleFilter::ParticleFilter() :
     prev_odom_loc_(0, 0),
     prev_odom_angle_(0),
-    odom_initialized_(false) {}
+    odom_initialized_(false),
+    dist_traveled_since_update_(0.0) {}
 
 void ParticleFilter::GetParticles(vector<Particle>* particles) const {
   *particles = particles_;
@@ -177,7 +185,7 @@ void ParticleFilter::Update(const vector<float>& ranges,
 
     // log_likelihood +=  FLAGS_gamma * (-0.5) * (pow(ranges[i] - predicted_ranges[i], 2) / pow(FLAGS_stddev, 2));  // Simple Version
   }
-  p_ptr->weight = 1.0 / abs(log_likelihood);
+  p_ptr->weight = abs(log_likelihood);
 }
 
 void ParticleFilter::Resample() {
@@ -222,8 +230,23 @@ void ParticleFilter::ObserveLaser(const vector<float>& ranges,
   // A new laser scan observation is available (in the laser frame)
   // Call the Update and Resample steps as necessary.
 
+  if(dist_traveled_since_update_ < FLAGS_min_dist_for_update){
+    return;
+  }
+
+  dist_traveled_since_update_ = 0.0;
+
+  double highest_log_likelihood = 0;
+
   for(auto& particle : particles_){
     Update(ranges, range_min, range_max, angle_min, angle_max, &particle);
+    if(particle.weight > highest_log_likelihood){
+      highest_log_likelihood = particle.weight;
+    }
+  }
+
+  for(auto& particle : particles_){
+    particle.weight = highest_log_likelihood / particle.weight;
   }
 
   Resample();
@@ -253,8 +276,11 @@ void ParticleFilter::Predict(const Vector2f& odom_loc,
 
   // Possible anomolous odometry reading, ignore it
   if(delta_baselink.norm() > 0.5 || abs(delta_theta_baselink) > (3.14159 / 2.0)){
+    cout << "BAD ODOM" << endl;
     return;
   }
+
+  dist_traveled_since_update_ += delta_baselink.norm();
 
   // Calculate change in pose in map frame
   float delta_x = map_loc[0] - prev_map_loc_[0];
@@ -304,9 +330,14 @@ void ParticleFilter::Initialize(const string& map_file,
   // Create num_particles random particles each starting at the car's initial position
   particles_.clear();
   for (int i = 0; i < FLAGS_num_particles; i++) {
+    float x_noise = rng_.Gaussian(0.0, FLAGS_std_dev_init_t);
+    float y_noise = rng_.Gaussian(0.0, FLAGS_std_dev_init_t);
+    float theta_noise = rng_.Gaussian(0.0, FLAGS_std_dev_init_r);
+    Vector2f t_noise(x_noise, y_noise);
+
     Particle particle;
-    particle.loc = loc;
-    particle.angle = angle;
+    particle.loc = loc + t_noise;
+    particle.angle = angle + theta_noise;
     particle.weight = 0;
     particles_.push_back(particle);
   }
@@ -322,16 +353,32 @@ void ParticleFilter::GetLocation(Eigen::Vector2f* loc_ptr,
   // Compute the best estimate of the robot's location based on the current set
   // of particles. The computed values must be set to the `loc` and `angle`
   // variables to return them. Modify the following assignments:
-  Particle best_particle = particles_[0];
-  double best_weight = 0;
-  for(auto particle : particles_){
-    if(particle.weight > best_weight){
-      best_particle = particle;
-      best_weight = particle.weight;
-    }
+
+  std::vector<Particle> sorted_particles = particles_; 
+  std::sort(sorted_particles.begin(), sorted_particles.end(), [](const Particle& a, const Particle& b) {
+    return a.weight > b.weight;
+  });
+
+  size_t num_best_particles =  particles_.size() * FLAGS_pct_best_particles;
+
+  Vector2f loc_sum(0.0, 0.0);
+  float angle_sum_sin = 0.0;
+  float angle_sum_cos = 0.0;
+  for(size_t i = 0; i < num_best_particles; i++){
+    auto particle = sorted_particles[i];
+    loc_sum += particle.loc;
+    // Use circular mean to get the avg angle (convert from polar to cartesian, take mean, then back to polar)
+    angle_sum_sin += sin(particle.angle);
+    angle_sum_cos += cos(particle.angle); 
   }
-  loc = best_particle.loc;
-  angle = best_particle.angle;
+
+  Vector2f avg_loc = loc_sum / (float)num_best_particles;
+  float avg_sin = angle_sum_sin / (float)num_best_particles;
+  float avg_cos = angle_sum_cos / (float)num_best_particles;
+  float avg_angle = atan2(avg_sin, avg_cos);
+
+  loc = avg_loc;
+  angle = avg_angle;
 }
 
 
