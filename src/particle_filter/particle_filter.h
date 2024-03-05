@@ -104,8 +104,7 @@ class ParticleFilter {
   float prev_odom_angle_;
   bool odom_initialized_;
 
-  Eigen::Vector2f prev_map_loc_;
-  float prev_map_angle_;
+  float dist_traveled_since_update_;
 };
 }  // namespace slam
 

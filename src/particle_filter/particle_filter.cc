@@ -58,6 +58,13 @@ DEFINE_double(gamma, 0.1, "Ray correlation [1/num_particles,1]");
 DEFINE_double(d_long, 1, "Used in Observation Likelihood Model, has to be higher than d_short, 1m - 1.5m");
 DEFINE_double(d_short, 0.2, "Used in Observation Likelihood Model, around .2m - .5m");
 
+DEFINE_double(std_dev_init_t, 0.33, "Std deviation of noise added to initial points' location");
+DEFINE_double(std_dev_init_r, 0.2, "Std deviation of noise added to initial points' rotation");
+
+DEFINE_double(pct_best_particles, 0.1, "Percentage of particles to consider when getting location of car");
+
+DEFINE_double(min_dist_for_update, 0.2, "Distance the car must travel before an update and resample can occur");
+
 namespace particle_filter {
 
 config_reader::ConfigReader config_reader_({"config/particle_filter.lua"});
@@ -180,7 +187,7 @@ void ParticleFilter::Update(const vector<float>& ranges,
 
     // log_likelihood +=  FLAGS_gamma * (-0.5) * (pow(ranges[i] - predicted_ranges[i], 2) / pow(FLAGS_stddev, 2));  // Simple Version
   }
-  p_ptr->weight = 1.0 / abs(log_likelihood);
+  p_ptr->weight = abs(log_likelihood);
 }
 
 void ParticleFilter::Resample() {
@@ -225,8 +232,21 @@ void ParticleFilter::ObserveLaser(const vector<float>& ranges,
   // A new laser scan observation is available (in the laser frame)
   // Call the Update and Resample steps as necessary.
 
+  if(dist_traveled_since_update_ < FLAGS_min_dist_for_update){
+    return;
+  }
+  dist_traveled_since_update_ = 0.0;
+
+  double highest_log_likelihood = 0;
   for(auto& particle : particles_){
     Update(ranges, range_min, range_max, angle_min, angle_max, &particle);
+    if(particle.weight > highest_log_likelihood){
+      highest_log_likelihood = particle.weight;
+    }
+  }
+
+  for(auto& particle : particles_){
+    particle.weight = highest_log_likelihood / particle.weight;
   }
 
   Resample();
@@ -246,44 +266,60 @@ void ParticleFilter::Predict(const Vector2f& odom_loc,
     odom_initialized_ = true;
   }
 
-  // Convert the robot's pose in odom frame to be in map frame
+  // Convert the robot's pose in odom frame to be in baselink frame
   Eigen::Rotation2Df r_odom_to_baselink(-prev_odom_angle_);
   Vector2f delta_baselink = r_odom_to_baselink * (odom_loc - prev_odom_loc_);
-  Eigen::Rotation2Df r_map_to_baselink(prev_map_angle_);
-  Vector2f map_loc = prev_map_loc_ + r_map_to_baselink * delta_baselink;
-  float delta_theta_baselink = odom_angle - prev_odom_angle_;
-  float map_angle = prev_map_angle_ + delta_theta_baselink;
+  float delta_theta_baselink = (odom_angle - prev_odom_angle_);
+  while (delta_theta_baselink > 3.14159) delta_theta_baselink -= 2 * 3.14159;
+  while (delta_theta_baselink < -3.14159) delta_theta_baselink += 2 * 3.14159; 
 
   // Possible anomolous odometry reading, ignore it
   if(delta_baselink.norm() > 0.5 || abs(delta_theta_baselink) > (3.14159 / 2.0)){
+    cout << "BAD ODOM" << endl;
     return;
   }
 
-  // Calculate change in pose in map frame
-  float delta_x = map_loc[0] - prev_map_loc_[0];
-  float delta_y = map_loc[1] - prev_map_loc_[1];
-  float delta_theta = map_angle - prev_map_angle_;
+  // Add to the distance the robot has traveled since the last update
+  dist_traveled_since_update_ += delta_baselink.norm();
+
+  // Calculate change in pose for std devs
+  float delta_x_odom = odom_loc[0] - prev_odom_loc_[0];
+  float delta_y_odom = odom_loc[1] - prev_odom_loc_[1];
+  float delta_theta_odom = odom_angle - prev_odom_angle_;
+  while (delta_theta_odom > 3.14159) delta_theta_odom -= 2 * 3.14159;
+  while (delta_theta_odom < -3.14159) delta_theta_odom += 2 * 3.14159; 
 
   // Determine uncertainty for translation motion
-  float translation_uncertainty_t = FLAGS_k1 * sqrt(delta_x * delta_x + delta_y * delta_y);
-  float rotation_uncertainty_t = FLAGS_k2 * abs(delta_theta);
+  float translation_uncertainty_t = FLAGS_k1 * sqrt(delta_x_odom * delta_x_odom + delta_y_odom * delta_y_odom);
+  float rotation_uncertainty_t = FLAGS_k2 * abs(delta_theta_odom);
   float std_dev_t = translation_uncertainty_t + rotation_uncertainty_t;
 
   // Determine uncertainty for rotational motion
-  float translation_uncertainty_r = FLAGS_k3 * sqrt(delta_x * delta_x + delta_y * delta_y);
-  float rotation_uncertainty_r = FLAGS_k4 * abs(delta_theta);
+  float translation_uncertainty_r = FLAGS_k3 * sqrt(delta_x_odom * delta_x_odom + delta_y_odom * delta_y_odom);
+  float rotation_uncertainty_r = FLAGS_k4 * abs(delta_theta_odom);
   float std_dev_r = translation_uncertainty_r + rotation_uncertainty_r;
 
   // Apply some random noise to each particle based on a simple motion model
   for (auto &particle : particles_) {
+    // Get the particles position in map frame
+    Eigen::Rotation2Df r_map_to_baselink(particle.angle);
+    Vector2f map_loc = particle.loc + r_map_to_baselink * delta_baselink;
+    float map_angle = particle.angle + delta_theta_baselink;
+
+    // Generate some noise
     float x_noise = rng_.Gaussian(0.0, std_dev_t);
     float y_noise = rng_.Gaussian(0.0, std_dev_t);
     float theta_noise = rng_.Gaussian(0.0, std_dev_r);
 
+    // Apply noise to the deltas
+    float delta_x = map_loc[0] - particle.loc[0];
+    float delta_y = map_loc[1] - particle.loc[1];
+    float delta_theta = map_angle - particle.angle;
     float noisy_delta_x = delta_x + x_noise;
     float noisy_delta_y = delta_y + y_noise;
     float noisy_delta_theta = delta_theta + theta_noise;
 
+    // Change the particles location
     particle.loc[0] += noisy_delta_x;
     particle.loc[1] += noisy_delta_y;
     particle.angle += noisy_delta_theta;
@@ -292,8 +328,6 @@ void ParticleFilter::Predict(const Vector2f& odom_loc,
   // Update previous values
   prev_odom_loc_ = odom_loc;
   prev_odom_angle_ = odom_angle;
-  prev_map_loc_ = map_loc;
-  prev_map_angle_ = map_angle;
 }
 
 void ParticleFilter::Initialize(const string& map_file,
@@ -307,15 +341,17 @@ void ParticleFilter::Initialize(const string& map_file,
   // Create num_particles random particles each starting at the car's initial position
   particles_.clear();
   for (int i = 0; i < FLAGS_num_particles; i++) {
+    float x_noise = rng_.Gaussian(0.0, FLAGS_std_dev_init_t);
+    float y_noise = rng_.Gaussian(0.0, FLAGS_std_dev_init_t);
+    float theta_noise = rng_.Gaussian(0.0, FLAGS_std_dev_init_r);
+    Vector2f t_noise(x_noise, y_noise);
+
     Particle particle;
-    particle.loc = loc;
-    particle.angle = angle;
+    particle.loc = loc + t_noise;
+    particle.angle = angle + theta_noise;
     particle.weight = 0;
     particles_.push_back(particle);
   }
-
-  prev_map_angle_ = angle;
-  prev_map_loc_ = loc;
 }
 
 void ParticleFilter::GetLocation(Eigen::Vector2f* loc_ptr, 
@@ -325,16 +361,31 @@ void ParticleFilter::GetLocation(Eigen::Vector2f* loc_ptr,
   // Compute the best estimate of the robot's location based on the current set
   // of particles. The computed values must be set to the `loc` and `angle`
   // variables to return them. Modify the following assignments:
-  Particle best_particle = particles_[0];
-  double best_weight = 0;
-  for(auto particle : particles_){
-    if(particle.weight > best_weight){
-      best_particle = particle;
-      best_weight = particle.weight;
-    }
+  std::vector<Particle> sorted_particles = particles_; 
+  std::sort(sorted_particles.begin(), sorted_particles.end(), [](const Particle& a, const Particle& b) {
+    return a.weight > b.weight;
+  });
+
+  size_t num_best_particles =  particles_.size() * FLAGS_pct_best_particles;
+
+  Vector2f loc_sum(0.0, 0.0);
+  float angle_sum_sin = 0.0;
+  float angle_sum_cos = 0.0;
+  for(size_t i = 0; i < num_best_particles; i++){
+    auto particle = sorted_particles[i];
+    loc_sum += particle.loc;
+    // Use circular mean to get the avg angle (convert from polar to cartesian, take mean, then back to polar)
+    angle_sum_sin += sin(particle.angle);
+    angle_sum_cos += cos(particle.angle); 
   }
-  loc = best_particle.loc;
-  angle = best_particle.angle;
+
+  Vector2f avg_loc = loc_sum / (float)num_best_particles;
+  float avg_sin = angle_sum_sin / (float)num_best_particles;
+  float avg_cos = angle_sum_cos / (float)num_best_particles;
+  float avg_angle = atan2(avg_sin, avg_cos);
+
+  loc = avg_loc;
+  angle = avg_angle;
 }
 
 
