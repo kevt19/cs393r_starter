@@ -105,6 +105,8 @@ class ParticleFilter {
   bool odom_initialized_;
 
   float dist_traveled_since_update_;
+
+  std::set<size_t> intersecting_map_indices_;
 };
 }  // namespace slam
 

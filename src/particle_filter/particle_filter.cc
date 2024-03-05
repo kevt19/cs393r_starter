@@ -118,11 +118,16 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
     theta += angle_increment;
   }
 
+  // This will hold the index into map_.lines for the map line that each ray intersects
+  vector<size_t> shortest_intersecting_map_line_indices;
+  shortest_intersecting_map_line_indices.resize(ray_line_segments.size());
+
   ////// Obtains the closest intersection point for each ray line
   for (size_t i = 0; i < ray_line_segments.size(); i++)
   {
     line2f ray_line = ray_line_segments[i];
     vector<Vector2f> intersection_list; // Initialize a vector of intersection points
+    vector<size_t> intersecting_map_line_indices; // Keep track of which map lines have been intersected with
     //// Iterate through every "map line" in "vector map"
     for (size_t j = 0; j < map_.lines.size(); ++j) 
     {
@@ -132,6 +137,7 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
       if (map_line.Intersection(ray_line, &intersection_point)) 
       {
         intersection_list.push_back(intersection_point);
+        intersecting_map_line_indices.push_back(j);
       }
     }
 
@@ -139,8 +145,10 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
     scan[i] = Vector2f(range_max, 0);
     float smallest = range_max;
     ranges[i] = smallest;
-    for (Vector2f point: intersection_list)
+    for (size_t p = 0; p < intersection_list.size(); p++)
     {
+      Vector2f point = intersection_list[p];
+
       float point_distance = (point - laser_loc).norm();
       if (point_distance < smallest)
       {
@@ -148,8 +156,15 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
         scan[i] = point;
 
         ranges[i] = smallest;
+
+        shortest_intersecting_map_line_indices[i] = intersecting_map_line_indices[p];
       }
     }
+  }
+
+  // Place the interesecting map line indices into a set to avoid repeats
+  for(auto midx : shortest_intersecting_map_line_indices){
+    intersecting_map_indices_.insert(midx);
   }
 }
 
@@ -238,6 +253,7 @@ void ParticleFilter::ObserveLaser(const vector<float>& ranges,
   dist_traveled_since_update_ = 0.0;
 
   double highest_log_likelihood = 0;
+  intersecting_map_indices_.clear();
   for(auto& particle : particles_){
     Update(ranges, range_min, range_max, angle_min, angle_max, &particle);
     if(particle.weight > highest_log_likelihood){
@@ -299,8 +315,12 @@ void ParticleFilter::Predict(const Vector2f& odom_loc,
   float rotation_uncertainty_r = FLAGS_k4 * abs(delta_theta_odom);
   float std_dev_r = translation_uncertainty_r + rotation_uncertainty_r;
 
+  vector<size_t> intersecting_particle_indices;
+  vector<size_t> non_intersecting_particle_indices;
+
   // Apply some random noise to each particle based on a simple motion model
-  for (auto &particle : particles_) {
+  for (size_t i = 0; i < particles_.size(); i++) {
+    auto &particle = particles_[i];
     // Get the particles position in map frame
     Eigen::Rotation2Df r_map_to_baselink(particle.angle);
     Vector2f map_loc = particle.loc + r_map_to_baselink * delta_baselink;
@@ -319,10 +339,44 @@ void ParticleFilter::Predict(const Vector2f& odom_loc,
     float noisy_delta_y = delta_y + y_noise;
     float noisy_delta_theta = delta_theta + theta_noise;
 
+    Vector2f prev_particle_loc = particle.loc;
+
     // Change the particles location
     particle.loc[0] += noisy_delta_x;
     particle.loc[1] += noisy_delta_y;
     particle.angle += noisy_delta_theta;
+
+    // Determine if the particle traveled through a wall, and if so remember its index
+    line2f particle_travel_line(prev_particle_loc[0], prev_particle_loc[1], particle.loc[0], particle.loc[1]);
+    bool intersection_found = false;
+    for(auto map_idx : intersecting_map_indices_){
+      const line2f map_line = map_.lines[map_idx];
+      Vector2f intersection_point;
+      if (map_line.Intersection(particle_travel_line, &intersection_point)) {
+        intersecting_particle_indices.push_back(i);
+        intersection_found = true;
+        break;
+      }
+    }
+    if(!intersection_found){
+      non_intersecting_particle_indices.push_back(i);
+    }
+  }
+
+  // For each particle that traveled through a wall, change it so that it is a copy of a randomly selected particle
+  // that didn't move through a wall
+  for(int i = intersecting_particle_indices.size() - 1; i >= 0; i--){
+    cout << "INTERSECTING PARTICLE" << endl;
+    auto &intersecting_particle = particles_[i];
+
+    int sampled_idx = std::rand() % non_intersecting_particle_indices.size();
+    auto sampled_particle = particles_[sampled_idx];
+
+    intersecting_particle.loc = sampled_particle.loc;
+    intersecting_particle.angle = sampled_particle.angle;
+    intersecting_particle.weight = sampled_particle.weight;
+
+    // particles_.erase(particles_.begin() + particle_remove_indices[i]);
   }
 
   // Update previous values
