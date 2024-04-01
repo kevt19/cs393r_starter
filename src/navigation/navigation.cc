@@ -98,85 +98,113 @@ Navigation::Navigation(const string& map_name, ros::NodeHandle* n) :
   InitRosHeader("base_link", &drive_msg_.header);
 }
 
-float Navigation::GetHeuristic(const Vector2f& loc) {
-  return (loc - nav_goal_loc_).norm();
-}
-
-
-
 void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
-  // run A* and generate a set of waypoints
-  nav_goal_loc_ = loc;
-  nav_goal_angle_ = angle; // ignore angle for now
-  waypoints.clear();
-  // discretize the map
-  float resolution = 0.25; // in meters
-  std::vector<line2f> lines_list;
-  float max_range = resolution * 3.0; // arbitrarly big
-  
-  // get neighbors nodes
-  // compute 8 grid around robot_loc
-  std::Eigen::Vector2f neighbors;
-  float x = robot_loc_.x();
-  float y = robot_loc_.y();
-  for (int i = -1; i <= 1; i++){
-    for (int j = -1; j <= 1; j++){
-      if (i == 0 && j == 0){
-        continue;
-      }
-      neighbors.push_back(Eigen::Vector2f(x + i*resolution, y + j*resolution));
-    }
-  } 
-  float max_range = 3.0 * resolution / 2.0;
-  GetSceneLines(robot_loc_, max_range, &lines_list);
-  // create line segment from x, y to neighbor
-  std::vector<line2f> possiblePaths;
-  for (int i = 0; i < neighbors.size(); i++){
-    float neighbor_x = neighbors[i].x();
-    float neighbor_y = neighbors[i].y();
-    line2f line(x, y, neighbor_x, neighbor_y);
-    possiblePaths.push_back(line);
-  }
-  
-  // check if we've already visited a node
-  float discrete_multiplier = 1.0 / resolution; // males it discrete
-  for (int i = 0; i < neighbors.size(); i++){
-    int x = neighbors[i].x() * discrete_multiplier;
-    int y = neighbors[i].y() * discrete_multiplier;
-    if (visited[std::make_pair(x, y)]){
-      possiblePaths.erase(possiblePaths.begin() + i);
-    }
-  }
+    // run A* and generate a set of waypoints
+    nav_goal_loc_ = loc;
+    nav_goal_angle_ = angle; // ignore angle for now
+    waypoints.clear();
+    // discretize the map
+    float resolution = 0.25; // in meters
+    std::vector<geometry::line2f> lines_list;
+    
+    // get neighbors nodes
+    // compute 8 grid around robot_loc
+    std::vector<Eigen::Vector2f> neighbors;
+    float x = robot_loc_.x();
+    float y = robot_loc_.y();
 
-  // check if line segment intersects with any of the lines in the map
-  for (int i = 0; i < possiblePaths.size(); i++){
-    for (int j = 0; j < lines_list.size(); j++){
-      Vector2f intersectionPoint;
-      if (lines_list[j].Intersection(possiblePaths[i], &intersectionPoint)){
-        // if it intersects, remove the line segment
-        possiblePaths.erase(possiblePaths.begin() + i);
-        break;
-      }
+    float map_min_x = 1000.0;
+    float map_min_y = 1000.0;
+    float map_max_x = -1000.0;
+    float map_max_y = -1000.0;
+
+    vector<geometry::line2f> all_map_lines;
+    float max_map_range = 1000.0;
+    map_.GetSceneLines(robot_loc_, max_map_range, &all_map_lines);
+    int all_map_lines_size = all_map_lines.size();
+    for (int i = 0; i < all_map_lines_size; i++){
+      Eigen::Vector2f p0 = all_map_lines[i].p0;
+      Eigen::Vector2f p1 = all_map_lines[i].p1;
+      map_min_x = min(map_min_x, min(p0.x(), p1.x()));
+      map_min_y = min(map_min_y, min(p0.y(), p1.y()));
+      map_max_x = max(map_max_x, max(p0.x(), p1.x()));
+      map_max_y = max(map_max_y, max(p0.y(), p1.y()));
     }
 
-  // iterate through all possible paths, check euclidean distance to goal
-  // add the path with the smallest distance to the goal to the waypoints
-  float min_distance = 1000000;
-  line2f bestPath;
-  for (int i = 0; i < possiblePaths.size(); i++){
-    float distance = (possiblePaths[i].p1 - nav_goal_loc_).norm();
-    float distanceToNode = (possiblePaths[i].p1 - possiblePaths[i].p0).norm();
-    if ((distance + distanceToNode) < min_distance){
-      min_distance = distance;
-      bestPath = possiblePaths[i];
+    // check if current x, y is in the map
+    for (int i = -1; i <= 1; i++){
+      for (int j = -1; j <= 1; j++){
+        if (i == 0 && j == 0){
+          continue;
+        }
+        if (x + i*resolution < map_min_x || x + i*resolution > map_max_x || y + j*resolution < map_min_y || y + j*resolution > map_max_y){
+          continue;
+        }
+        neighbors.push_back(Eigen::Vector2f(x + i*resolution, y + j*resolution));
+      }
+    } 
+    float max_range = 3.0 * resolution / 2.0;
+    map_.GetSceneLines(robot_loc_, max_range, lines_list);
+    // create line segment from x, y to neighbor
+    std::vector<geometry::line2f> possiblePaths;
+    int n_neighbors = neighbors.size();
+
+    for (int i = 0; i < n_neighbors; i++){
+      float neighbor_x = neighbors[i].x();
+      float neighbor_y = neighbors[i].y();
+      geometry::line2f segment = geometry::line2f(x, y, neighbor_x, neighbor_y);
+      possiblePaths.push_back(segment);
     }
-  }
-  waypoints.push_back(bestPath.p1);
-  x = bestPath.p1.x();
-  y = bestPath.p1.y();
-  int x_discrete = x * discrete_multiplier;
-  int y_discrete = y * discrete_multiplier;
-  visited[std::make_pair(x_discrete, y_discrete)] = true;
+    
+    // check if we've already visited a node
+    float discrete_multiplier = 1.0 / resolution; // males it discrete
+    std::vector<geometry::line2f>::iterator iter;
+    int pathIdx = 0;
+    for (iter = possiblePaths.begin(); iter != possiblePaths.end();){
+      int x = neighbors[pathIdx].x() * discrete_multiplier;
+      int y = neighbors[pathIdx].y() * discrete_multiplier;
+      pathIdx++;
+      if (visited[std::make_pair(x, y)]){
+        possiblePaths.erase(iter);
+      }
+    }
+
+    // check if line segment intersects with any of the lines in the map
+    // std::vector<geometry::line2f>::iterator iter;
+    int n_lines = lines_list.size();
+    for (iter = possiblePaths.begin(); iter != possiblePaths.end();){
+      for (int j = 0; j < n_lines; j++){
+        Eigen::Vector2f intersectionPoint;
+        if (lines_list[j].Intersects(iter)){
+          // if it intersects, remove the line segment
+          possiblePaths.erase(iter);
+          break;
+        }
+      }
+    }
+
+    // iterate through all possible paths, check euclidean distance to goal
+    // add the path with the smallest distance to the goal to the waypoints
+    float min_distance = 1000000;
+    geometry::line2f bestPath = possiblePaths[0];
+    int nPossiblePaths = possiblePaths.size();
+    for (int i = 0; i < nPossiblePaths; i++){
+      float distance = (possiblePaths[i].p1 - nav_goal_loc_).norm();
+      float distanceToNode = (possiblePaths[i].p1 - possiblePaths[i].p0).norm();
+      if ((distance + distanceToNode) < min_distance){
+        min_distance = distance;
+        bestPath = possiblePaths[i];
+      }
+    }
+    waypoints.push_back(bestPath.p1);
+    Eigen::Vector2f p0 = bestPath.p0;
+    Eigen::Vector2f p1 = bestPath.p1;
+    visualization::DrawLine(p0, p1, 0xff0000, local_viz_msg_);
+    x = bestPath.p1.x();
+    y = bestPath.p1.y();
+    int x_discrete = x * discrete_multiplier;
+    int y_discrete = y * discrete_multiplier;
+    visited[std::make_pair(x_discrete, y_discrete)] = true;
 }
 
 
