@@ -25,8 +25,6 @@
 
 #include "vector_map/vector_map.h"
 
-#include "simple_queue.h"
-
 #ifndef NAVIGATION_H
 #define NAVIGATION_H
 
@@ -35,17 +33,6 @@ namespace ros {
 }  // namespace ros
 
 namespace navigation {
-
-struct Control{
-  float velocity;
-  float curvature;
-  double time;
-};
-
-struct Odometry{
-  Eigen::Vector2f loc;
-  float omega;
-};
 
 struct PathOption {
   float curvature;
@@ -71,33 +58,16 @@ class Navigation {
                       const Eigen::Vector2f& vel,
                       float ang_vel);
 
-  float ComputeScore(float free_path_length, float clearance, float distance_to_goal);
-
-  float ComputeFreePathLength(double curvature, const std::vector<Eigen::Vector2f>& cloud);
-
-  float ComputeDistanceToGoal(double curvature, double free_path_length, Odometry& odometry);
-
-  float ComputeClearance(double curvature, double free_path_length, const std::vector<Eigen::Vector2f>& cloud);
-
-  void FindBestPath(double& target_curvature, double& target_free_path_l, Odometry& odometry, const std::vector<Eigen::Vector2f>& cloud);
-
-
-
-  std::vector<Eigen::Vector2f> CompensatePointCloud(const std::vector<Eigen::Vector2f>& cloud, const Odometry& odometry);
-
   // Updates based on an observed laser scan
   void ObservePointCloud(const std::vector<Eigen::Vector2f>& cloud,
                          double time);
-
-  Odometry CompensateLatencyLoc();
-
-  // Move forward a specified distance 
-  double MoveForward(double free_path_l);
 
   // Main function called continously from main
   void Run();
   // Used to set the next target pose.
   void SetNavGoal(const Eigen::Vector2f& loc, float angle);
+  void ObstacleAvoidance();
+  void OneDTOC(PathOption p, Eigen::Vector2f stg);
 
  private:
 
@@ -133,8 +103,24 @@ class Navigation {
   // Map of the environment.
   vector_map::VectorMap map_;
 
-  // mantains the past controls sent: velocity, omega, time
-  std::vector<Control> past_controls_;
+
+  // Car parameters
+  const float ROBOT_WIDTH_;
+  const float ROBOT_LENGTH_;
+  const float MAX_CLEARANCE_;
+  const float WHEEL_BASE_;
+  const float MAX_CURVATURE_;
+  const float MAX_ACCEL_;
+  const float MAX_DEACCL_;
+  const float MAX_SHORT_TERM_GOAL_;
+  const float STOPPING_DISTANCE_;
+  const float MAX_SPEED_;
+  const float DELTA_T_;
+  const float SYSTEM_LATENCY_;
+  const float OBSTACLE_MARGIN_;
+
+
+  PathOption GetFreePathLength(PathOption p, Eigen::Vector2f stg);
 };
 
 }  // namespace navigation
