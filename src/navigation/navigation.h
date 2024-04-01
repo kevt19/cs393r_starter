@@ -58,6 +58,7 @@ class Navigation {
                       const Eigen::Vector2f& vel,
                       float ang_vel);
 
+
   // Updates based on an observed laser scan
   void ObservePointCloud(const std::vector<Eigen::Vector2f>& cloud,
                          double time);
@@ -70,7 +71,8 @@ class Navigation {
   void OneDTOC(PathOption p, Eigen::Vector2f stg);
 
  private:
-
+  std::map<std::pair<int, int>, bool> visited;
+  std::vector<Eigen::Vector2f> waypoints;
   // Whether odometry has been initialized.
   bool odom_initialized_;
   // Whether localization has been initialized.
