@@ -28,6 +28,7 @@
 #include <inttypes.h>
 #include <termios.h>
 #include <vector>
+#include <chrono>
 
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
@@ -182,12 +183,16 @@ void LaserCallback(const sensor_msgs::LaserScan& msg) {
     printf("Laser t=%f\n", msg.header.stamp.toSec());
   }
   last_laser_msg_ = msg;
+  auto start = std::chrono::high_resolution_clock::now();
   particle_filter_.ObserveLaser(
       msg.ranges,
       msg.range_min,
       msg.range_max,
       msg.angle_min,
       msg.angle_max);
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+  cout << "ObserveLaser Duration: " << duration.count() << endl;
   PublishVisualization();
 }
 
@@ -210,7 +215,11 @@ void OdometryCallback(const nav_msgs::Odometry& msg) {
   const Vector2f odom_loc(msg.pose.pose.position.x, msg.pose.pose.position.y);
   const float odom_angle =
       2.0 * atan2(msg.pose.pose.orientation.z, msg.pose.pose.orientation.w);
+  auto start = std::chrono::high_resolution_clock::now();
   particle_filter_.Predict(odom_loc, odom_angle);
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+  cout << "Predict Duration: " << duration.count() << endl;
   PublishLocation();
   PublishVisualization();
 }

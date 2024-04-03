@@ -3,6 +3,7 @@
 
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include <cuda.h>
 // #include "eigen3/Eigen/Dense"
 
 // #include "shared/math/geometry.h"
