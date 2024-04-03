@@ -18,9 +18,7 @@
 \author  Joydeep Biswas, (C) 2019
 */
 //========================================================================
-#include <algorithm>
-#include <string>
-#include <vector>
+
 #include "gflags/gflags.h"
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
@@ -33,9 +31,12 @@
 #include "shared/math/math_util.h"
 #include "shared/util/timer.h"
 #include "shared/ros/ros_helpers.h"
-#include "simple_queue.h"
 #include "navigation.h"
 #include "visualization/visualization.h"
+#include "simple_queue.h"
+#include "path_options.h"
+#include "latency_compensation.h"
+
 using Eigen::Vector2f;
 using amrl_msgs::AckermannCurvatureDriveMsg;
 using amrl_msgs::VisualizationMsg;
@@ -43,7 +44,6 @@ using std::string;
 using std::vector;
 using std::max;
 using std::min;
-using std::swap;
 
 using namespace math_util;
 using namespace ros_helpers;
@@ -75,19 +75,8 @@ Navigation::Navigation(const string& map_name, ros::NodeHandle* n) :
     nav_complete_(true),
     nav_goal_loc_(0, 0),
     nav_goal_angle_(0),
-    ROBOT_WIDTH_(0.281),
-    ROBOT_LENGTH_(0.535),
-    MAX_CLEARANCE_(0.5),
-    WHEEL_BASE_(0.324),
-    MAX_CURVATURE_(1.0),
-    MAX_ACCEL_(4.0),
-    MAX_DEACCL_(9.0),
-    MAX_SHORT_TERM_GOAL_(5.0),
-    STOPPING_DISTANCE_(0.1),
-    MAX_SPEED_(1.0),
-    DELTA_T_(0.05),
-    SYSTEM_LATENCY_(0.23),
-    OBSTACLE_MARGIN_(0.1) {
+    latency_compensation_(new LatencyCompensation(0, 0, 0)) 
+  {
   map_.Load(GetMapFileFromName(map_name));
   drive_pub_ = n->advertise<AckermannCurvatureDriveMsg>(
       "ackermann_curvature_drive", 1);
@@ -381,229 +370,89 @@ void Navigation::UpdateOdometry(const Vector2f& loc,
     odom_angle_ = angle;
     return;
   }
-  odom_loc_ = loc;
-  odom_angle_ = angle;
+  latency_compensation_->recordObservation(loc[0], loc[1], angle, ros::Time::now().toSec());
+  Observation predictedState = latency_compensation_->getPredictedState();
+  odom_loc_ = {predictedState.x, predictedState.y};
+  odom_angle_ = predictedState.theta;
+  robot_vel_ = {predictedState.vx, predictedState.vy};
+  robot_omega_ = predictedState.omega;
+
+  point_cloud_ = latency_compensation_->forward_predict_point_cloud(point_cloud_, predictedState.x, predictedState.y, predictedState.theta);
 }
 
 void Navigation::ObservePointCloud(const vector<Vector2f>& cloud,
                                    double time) {
-  point_cloud_ = cloud;
-
+  point_cloud_ = cloud;                            
 }
 
-
-PathOption SelectOptimalPath(vector<PathOption> path_options, Vector2f short_term_goal){
-  PathOption result;
-  float w_dist_to_goal = -0.50;
-  float w_clearance = 5;
-  result.free_path_length = 0;
-  result.clearance = 0;
-  result.curvature = 0;
-  float max_score = -100000.0;
-  for(auto p : path_options){
-    float distance = (p.closest_point - short_term_goal).norm();
-    float score = p.free_path_length + w_clearance*p.clearance + w_dist_to_goal*distance;
-    if (score > max_score){
-      max_score = score;
-      result = p;
-    }
-    printf("Curvature %f, Distance to goal %f, Clearance %f, Free path length %f, score %f\n", p.curvature, distance, p.clearance, p.free_path_length, score);
-  }
-  return result;
+void Navigation::SetLatencyCompensation(LatencyCompensation* latency_compensation) {
+  latency_compensation_ = latency_compensation;
 }
 
-void Navigation::ObstacleAvoidance() {
-  Vector2f short_term_goal(10,0);
-  // Vector2f short_term_goal = nav_goal_loc_;
-  // Set up initial parameters
-  drive_msg_.header.stamp = ros::Time::now();
-  drive_msg_.curvature = 0;
-  drive_msg_.velocity = 0;
+// Convert (velocity, curvature) to (x_dot, y_dot, theta_dot)
+Control Navigation::GetCartesianControl(float velocity, float curvature, double time) {
+  float x_dot = velocity * cos(curvature);
+  float y_dot = velocity * sin(curvature);
+  float theta_dot = velocity * curvature;
 
-  // Time control delta
-  // const float deltaT = 0.05;
-  // Number of path options to take
-  const float pathOptions = 20;
-  vector<PathOption> path_array;
-
-  // Iterate over all the paths
-  for(float c = -MAX_CURVATURE_; c<= MAX_CURVATURE_; c+=MAX_CURVATURE_/pathOptions){
-    PathOption p;
-    p.curvature = c;
-
-    //Calculate the maximum possible free path length
-    if(c < kEpsilon && c > -kEpsilon){
-      // Straight path
-      p.free_path_length = MAX_SHORT_TERM_GOAL_;
-    } else {
-      float turning_radius = 1/p.curvature;
-      // Using the optimization mentioned in class where we take the free path 
-      // only till the tangent.
-      p.free_path_length = fabs(turning_radius)*atan2(MAX_SHORT_TERM_GOAL_, fabs(turning_radius));
-    }
-    p = GetFreePathLength(p, short_term_goal);
-    visualization::DrawPathOption(p.curvature,
-                                  p.free_path_length,
-                                  p.clearance,
-                                  0x0000FF,
-                                  false,
-                                  local_viz_msg_);
-      visualization::DrawCross(p.closest_point, 0.05, 0x00A000, local_viz_msg_);
-      path_array.push_back(p);
-    }
-
-    PathOption p = SelectOptimalPath(path_array, short_term_goal);
-    visualization::DrawPathOption(p.curvature,
-                                p.free_path_length,
-                                p.clearance,
-                                0xFF0000,
-                                true,
-                                local_viz_msg_);
-    visualization::DrawCross(p.closest_point, 0.1, 0xFF0000, local_viz_msg_);
-    OneDTOC(p, short_term_goal);
-}
-
-PathOption Navigation::GetFreePathLength(PathOption p, Eigen::Vector2f short_term_goal){
-  float c = p.curvature;
-  float ret_free_path_length = MAX_SHORT_TERM_GOAL_;
-  float clearance = MAX_CLEARANCE_;
-  Vector2f obstruction;
-  if (fabs(c) < kEpsilon){
-    float l = ROBOT_LENGTH_/2 + WHEEL_BASE_/2 + OBSTACLE_MARGIN_;
-    float w = ROBOT_WIDTH_/2 + OBSTACLE_MARGIN_;
-    for (auto &p : point_cloud_){
-      if (fabs(p.y()) > w){
-        continue;
-      }
-      float free_path_length = p.x() - l;
-      if(ret_free_path_length > free_path_length){
-        ret_free_path_length = free_path_length;
-        obstruction = p;
-      }
-      ret_free_path_length = min(ret_free_path_length, p.x() - l);
-    }
-    for (auto &p : point_cloud_){
-      if (p.x() - l > ret_free_path_length || p.x() < 0.0){
-        continue;
-      }
-      clearance = min(clearance, fabs(p.y()));
-    }
-    p.free_path_length = max<float>(0.0, ret_free_path_length);
-    p.clearance = clearance;
-    p.obstruction = obstruction;
-
-    Vector2f closest_point(min<float>(p.free_path_length, short_term_goal.x()), 0);
-    p.closest_point = closest_point;
-    return p;
-  }
-  float r = 1/p.curvature;
-  Vector2f center(0, r);
-  float r1 = fabs(r) - ROBOT_WIDTH_/2 - OBSTACLE_MARGIN_;
-  float r2 = sqrt(Sq(fabs(r)+ROBOT_WIDTH_/2 + OBSTACLE_MARGIN_) + Sq(ROBOT_LENGTH_/2 + WHEEL_BASE_/2 + OBSTACLE_MARGIN_));
-  vector<float> angles(point_cloud_.size());
-  vector<float> distances(point_cloud_.size());
-  float min_angle = M_PI;
-
-  for(size_t i=0; i<point_cloud_.size(); i++){
-    Vector2f p_i = point_cloud_[i];
-    float r_obs = (p_i-center).norm();
-    float a = atan2(p_i.x(), Sign(c) * (center.y() - p_i.y()));
-    angles[i] = a;
-    distances[i] = r_obs;
-    if (a < 0.0 || r_obs < r1 || r_obs > r2){
-      continue;
-    }
-    float free_path_length = max<float>(0, a*fabs(r) - (ROBOT_LENGTH_/2 + WHEEL_BASE_/2 + OBSTACLE_MARGIN_));
-    if (free_path_length < ret_free_path_length){
-      ret_free_path_length = free_path_length;
-      obstruction = p_i;
-      min_angle = a;
-    }
-  }
-  for (size_t i = 0; i < point_cloud_.size(); i++){
-    if (angles[i] < min_angle && angles[i] > 0.0){
-      float c = fabs(distances[i] - fabs(r));
-      if (clearance > c){
-          clearance = c;
-      }
-    }
-  }
-
-  p.clearance = max<float>(0.0, clearance);
-  p.free_path_length = max<float>(0.0, ret_free_path_length);
-  p.obstruction = obstruction;
-  // printf("Clearance %f, Free Path Length %f, Curvature %f\n", p.clearance, p.free_path_length, p.curvature);
-
-  float closest_angle_extended = atan2(short_term_goal.x(), fabs(r- short_term_goal.y()));
-  float free_angle_extended = c*p.free_path_length;
-  float len_arc = fabs(closest_angle_extended)*fabs(r);
-  if(len_arc < p.free_path_length){
-    Vector2f closest_point(Sign(c)*r*sin(closest_angle_extended), r-r*cos(closest_angle_extended));
-    p.closest_point = closest_point;
-  } else{
-    Vector2f closest_point(r*sin(free_angle_extended), r-r*cos(free_angle_extended));
-    p.closest_point = closest_point;
-  }
-  return p;
-}
-
-void Navigation::OneDTOC(PathOption p, Vector2f stg){
-  // float dist_to_travel = p.free_path_length - 0.2;
-  // float w1 = 0.5;
-  // float w2 = 0.5;
-  float dist_to_travel = p.free_path_length -0.2;
-  // float dist_to_travel = (stg - p.closest_point).norm();
-  float curvature = p.curvature;
-  float speed = robot_vel_.norm();
-  drive_msg_.curvature = curvature;
-  if (dist_to_travel < STOPPING_DISTANCE_){
-    // Decelerate
-    drive_msg_.velocity = max<float>(0.0, speed - DELTA_T_*MAX_DEACCL_);
-  } else if (speed < MAX_SPEED_) {
-    if (SYSTEM_LATENCY_ * speed > dist_to_travel) {
-      drive_msg_.velocity = speed;
-    } else {
-      drive_msg_.velocity = min<float>(MAX_SPEED_, speed + DELTA_T_*MAX_ACCEL_);
-    }
-  } else{
-    drive_msg_.velocity = MAX_SPEED_;
-  }
-  visualization::DrawPathOption(p.curvature,
-                                  p.free_path_length,
-                                  p.clearance,
-                                  0xFF0000,
-                                  true,
-                                  local_viz_msg_);
-  drive_pub_.publish(drive_msg_);
-  viz_pub_.publish(local_viz_msg_);
+  return {x_dot, y_dot, theta_dot, time};
 }
 
 void Navigation::Run() {
   // This function gets called 20 times a second to form the control loop.
-  
+
   // Clear previous visualizations.
   visualization::ClearVisualizationMsg(local_viz_msg_);
   visualization::ClearVisualizationMsg(global_viz_msg_);
 
-  // If odometry has not been initialized, we can"t do anything.
+  // If odometry has not been initialized, we can't do anything.
   if (!odom_initialized_) return;
 
   // The control iteration goes here. 
   // Feel free to make helper functions to structure the control appropriately.
-  PathOption p;
-  p.free_path_length = 1.0;
-  p.curvature = 1.0;
-  p.clearance = 1.0;
-  // OneDTOC(p);
-  ObstacleAvoidance();
-  // ObstacleAvoidance();
+  
   // The latest observed point cloud is accessible via "point_cloud_"
 
-  // Determine if we already reached a waypoint
+  // Eventually, you will have to set the control values to issue drive commands:
+  // drive_msg_.curvature = ...;
+  // drive_msg_.velocity = ...;
+  float current_speed = robot_vel_.norm();
+  // cout << current_speed << endl;
+  // distance_traveled_ += current_speed * robot_config_.dt;
+  // float dist_to_go = (10 - distance_traveled_); // hard code to make it go 10 forward
+  // float cmd_vel = run1DTimeOptimalControl(dist_to_go, current_speed, robot_config_);
+
+  vector<PathOption> path_options = samplePathOptions(31, point_cloud_, robot_config_);
+  int best_path = selectPath(path_options, nav_goal_loc_, robot_angle_, robot_loc_);
+
+  drive_msg_.curvature = path_options[best_path].curvature;
+  drive_msg_.velocity = run1DTimeOptimalControl(path_options[best_path].free_path_length, current_speed, robot_config_);
+	
+  // cout << drive_msg_.curvature << " " << drive_msg_.velocity << endl;
+
+  // visualization here
+  // visualization::DrawRectangle(Vector2f(robot_config_.length/2 - robot_config_.base_link_offset, 0),
+  //     robot_config_.length, robot_config_.width, 0, 0x00FF00, local_viz_msg_);
+  // Draw all path options in blue
+  for (unsigned int i = 0; i < path_options.size(); i++) {
+      visualization::DrawPathOption(path_options[i].curvature, path_options[i].free_path_length, 0, 0x0000FF, false, local_viz_msg_);
+  }
+  // Draw the best path in red
+  visualization::DrawPathOption(path_options[best_path].curvature, path_options[best_path].free_path_length, path_options[best_path].clearance, 0xFF0000, true, local_viz_msg_);
+// Find the closest point in the point cloud
+
+  // Plot the closest point in purple
+  visualization::DrawLine(path_options[best_path].closest_point, Vector2f(0, 1/path_options[best_path].curvature), 0xFF00FF, local_viz_msg_);
+  // for debugging
+  
+    
+  visualization::DrawPoint(Vector2f(0, 1/path_options[best_path].curvature), 0x0000FF, local_viz_msg_);
+
+// Determine if we already reached a waypoint
   if (waypoints.size() > 0){
     Eigen::Vector2f waypoint = waypoints[0];
     float distance = (waypoint - robot_loc_).norm();
-    if (distance < 3){
+    if (distance < 1){
       waypoints.erase(waypoints.begin());
       nav_goal_loc_ = waypoints[0];
     }
@@ -631,27 +480,22 @@ void Navigation::Run() {
     previousWaypoint = robot_frame_waypoint;
   }
 
-  // Eigen::Vector2f waypoint = Eigen::Vector2f(0, 0);
-  // visualization::DrawCross(waypoint, 0.4, 0x000000, local_viz_msg_);
-
-
-  //Eigen::Vector2f origin = Eigen::Vector2f(0, 0);
-  //Eigen::Vector2f goal = Eigen::Vector2f(10, 10);
-  //visualization::DrawLine(origin, goal, 0x00FF00, local_viz_msg_);
-  viz_pub_.publish(local_viz_msg_);
-
-  // Eventually, you will have to set the control values to issue drive commands:
-  // drive_msg_.curvature = ...;
-  // drive_msg_.velocity = ...;
 
   // Add timestamps to all messages.
-  // local_viz_msg_.header.stamp = ros::Time::now();
-  // global_viz_msg_.header.stamp = ros::Time::now();
-  // drive_msg_.header.stamp = ros::Time::now();
-  // // Publish messages.
-  // viz_pub_.publish(local_viz_msg_);
-  // viz_pub_.publish(global_viz_msg_);
-  // drive_pub_.publish(drive_msg_);
+  local_viz_msg_.header.stamp = ros::Time::now();
+  global_viz_msg_.header.stamp = ros::Time::now();
+  drive_msg_.header.stamp = ros::Time::now();
+  // Publish messages.
+  viz_pub_.publish(local_viz_msg_);
+  viz_pub_.publish(global_viz_msg_);
+  drive_pub_.publish(drive_msg_);
+  // Record control for latency compensation
+  Control control = GetCartesianControl(drive_msg_.velocity, drive_msg_.curvature, drive_msg_.header.stamp.toSec());
+  latency_compensation_->recordControl(control);
+
+  // Hack because ssh -X is slow
+  // if (latency_compensation_->getControlQueue().size() == 100) {
+  //  exit(0);
 }
 
-}  // namespace navigation
+} // namespace navigation
