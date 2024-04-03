@@ -33,6 +33,7 @@
 #include "shared/math/math_util.h"
 #include "shared/util/timer.h"
 #include "shared/ros/ros_helpers.h"
+#include "simple_queue.h"
 #include "navigation.h"
 #include "visualization/visualization.h"
 using Eigen::Vector2f;
@@ -104,14 +105,15 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
     nav_goal_angle_ = angle; // ignore angle for now
     waypoints.clear();
     // discretize the map
-    float resolution = 0.25; // in meters
-    std::vector<geometry::line2f> lines_list;
+    float resolution = 0.5;
+    vector<geometry::line2f> lines_list;
+    // clear map
+    std::map<std::pair<int, int>, bool> visited;
+    std::map<std::pair<int, int>, std::pair<int, int>> waypointToParent;
     
     // get neighbors nodes
     // compute 8 grid around robot_loc
-    std::vector<Eigen::Vector2f> neighbors;
-    float x = robot_loc_.x();
-    float y = robot_loc_.y();
+    vector<Eigen::Vector2f> neighbors;
 
     float map_min_x = 1000.0;
     float map_min_y = 1000.0;
@@ -131,80 +133,171 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
       map_max_y = max(map_max_y, max(p0.y(), p1.y()));
     }
 
-    // check if current x, y is in the map
-    for (int i = -1; i <= 1; i++){
-      for (int j = -1; j <= 1; j++){
-        if (i == 0 && j == 0){
-          continue;
-        }
-        if (x + i*resolution < map_min_x || x + i*resolution > map_max_x || y + j*resolution < map_min_y || y + j*resolution > map_max_y){
-          continue;
-        }
-        neighbors.push_back(Eigen::Vector2f(x + i*resolution, y + j*resolution));
-      }
-    } 
-    float max_range = 3.0 * resolution / 2.0;
-    map_.GetSceneLines(robot_loc_, max_range, lines_list);
-    // create line segment from x, y to neighbor
+    int maxIterations = 100000;
+    // Loop until we reach goal or max iterations
+    std::vector<Eigen::Vector2f>::iterator neighborsIter;
     std::vector<geometry::line2f> possiblePaths;
-    int n_neighbors = neighbors.size();
-
-    for (int i = 0; i < n_neighbors; i++){
-      float neighbor_x = neighbors[i].x();
-      float neighbor_y = neighbors[i].y();
-      geometry::line2f segment = geometry::line2f(x, y, neighbor_x, neighbor_y);
-      possiblePaths.push_back(segment);
-    }
-    
-    // check if we've already visited a node
-    float discrete_multiplier = 1.0 / resolution; // males it discrete
-    std::vector<geometry::line2f>::iterator iter;
-    int pathIdx = 0;
-    for (iter = possiblePaths.begin(); iter != possiblePaths.end();){
-      int x = neighbors[pathIdx].x() * discrete_multiplier;
-      int y = neighbors[pathIdx].y() * discrete_multiplier;
-      pathIdx++;
-      if (visited[std::make_pair(x, y)]){
-        possiblePaths.erase(iter);
-      }
-    }
-
-    // check if line segment intersects with any of the lines in the map
-    // std::vector<geometry::line2f>::iterator iter;
-    int n_lines = lines_list.size();
-    for (iter = possiblePaths.begin(); iter != possiblePaths.end();){
-      for (int j = 0; j < n_lines; j++){
-        Eigen::Vector2f intersectionPoint;
-        if (lines_list[j].Intersects(iter)){
-          // if it intersects, remove the line segment
-          possiblePaths.erase(iter);
-          break;
-        }
-      }
-    }
-
-    // iterate through all possible paths, check euclidean distance to goal
-    // add the path with the smallest distance to the goal to the waypoints
-    float min_distance = 1000000;
-    geometry::line2f bestPath = possiblePaths[0];
-    int nPossiblePaths = possiblePaths.size();
-    for (int i = 0; i < nPossiblePaths; i++){
-      float distance = (possiblePaths[i].p1 - nav_goal_loc_).norm();
-      float distanceToNode = (possiblePaths[i].p1 - possiblePaths[i].p0).norm();
-      if ((distance + distanceToNode) < min_distance){
-        min_distance = distance;
-        bestPath = possiblePaths[i];
-      }
-    }
-    waypoints.push_back(bestPath.p1);
-    Eigen::Vector2f p0 = bestPath.p0;
-    Eigen::Vector2f p1 = bestPath.p1;
-    visualization::DrawLine(p0, p1, 0xff0000, local_viz_msg_);
-    x = bestPath.p1.x();
-    y = bestPath.p1.y();
+    SimpleQueue<Eigen::Vector2f, float> searchQueue;
+    // add first node to queue
+    // initial distance
+    float distance = (nav_goal_loc_ - robot_loc_).norm();
+    float discrete_multiplier = 1.0 / resolution; // makes it discrete
+    float x = robot_loc_.x();
+    float y = robot_loc_.y();
     int x_discrete = x * discrete_multiplier;
     int y_discrete = y * discrete_multiplier;
-    visited[std::make_pair(x_discrete, y_discrete)] = true;
+    x = x_discrete / discrete_multiplier;
+    y = y_discrete / discrete_multiplier;
+    Eigen::Vector2f currentLocation = Eigen::Vector2f(x, y);
+
+    searchQueue.Push(robot_loc_, distance);
+
+    int waypointIdx = 0;
+    // bool finished = false;
+    while (!searchQueue.Empty() && waypointIdx < maxIterations) {
+      // dequeue and get x, y
+      // std::pair<std::vector<Eigen::Vector2f>, Priority> currentPath = searchQueue.PopWithPriority();
+      std::pair<Eigen::Vector2f, float> poppedVal = searchQueue.PopWithPriority();
+      currentLocation = poppedVal.first;
+      float currentCost = -1.0 * poppedVal.second;
+      float estimatedDistance = (currentLocation - nav_goal_loc_).norm();
+      float actualDistanceSoFar = currentCost - estimatedDistance;
+
+      x = currentLocation.x();
+      y = currentLocation.y();
+      x_discrete = x * discrete_multiplier;
+      y_discrete = y * discrete_multiplier;
+      x = x_discrete / discrete_multiplier;
+      y = y_discrete / discrete_multiplier;
+
+      visited[std::make_pair(x_discrete, y_discrete)] = true;
+
+      // check if we already reached the goal
+      // Eigen::Vector2f wp = Eigen::Vector2f(x, y);
+      if ((currentLocation - nav_goal_loc_).norm() < resolution){
+        printf("Current location x: %f, y: %f\n", x, y);
+        printf("Reached goal\n");
+
+        // edge case: robot is already at goal, then just return
+        if (waypointIdx == 0){
+          break;
+        }
+
+        // copy over waypoints in reverse
+        vector<Eigen::Vector2f> reversedWaypoints;
+        Eigen::Vector2f backtrackLocation = currentLocation;
+        std::pair<int, int> backtrack = std::make_pair(x_discrete, y_discrete);
+        bool has_parent = true;
+        while (has_parent){
+          printf("current x: %d, y: %d\n", backtrack.first, backtrack.second);
+          x_discrete = backtrack.first;
+          y_discrete = backtrack.second;
+          x = x_discrete / discrete_multiplier;
+          y = y_discrete / discrete_multiplier;
+
+          backtrackLocation = Eigen::Vector2f(x, y);
+
+          reversedWaypoints.push_back(backtrackLocation);
+
+          // try to find parent
+          if (waypointToParent.find(std::make_pair(x_discrete, y_discrete)) == waypointToParent.end()){
+            has_parent = false;
+            break;
+          }
+          backtrack = waypointToParent[std::make_pair(x_discrete, y_discrete)];
+        }
+        // print out all waypoints
+        for (unsigned int i = 0; i < reversedWaypoints.size(); i++){
+          printf("Reversed waypoint x: %f, y: %f\n", reversedWaypoints[i].x(), reversedWaypoints[i].y());
+        }
+
+
+        // copy over waypoints in reverse
+        std::vector<Eigen::Vector2f>::iterator waypointsIter;
+        for (waypointsIter = reversedWaypoints.end() - 1; waypointsIter != reversedWaypoints.begin() - 1; waypointsIter--){
+          waypoints.push_back(*waypointsIter);
+          printf("Waypoint x: %f, y: %f\n", waypointsIter->x(), waypointsIter->y());
+        }
+        break;
+      }
+      printf("Waypoint iteration: %d\n", waypointIdx);
+      neighbors.clear();
+      possiblePaths.clear();
+
+      // check if current x, y is in the map
+      for (int i = -1; i <= 1; i++){
+        for (int j = -1; j <= 1; j++){
+          if (i == 0 && j == 0){
+            continue;
+          }
+          if (x + i*resolution < map_min_x || x + i*resolution > map_max_x || y + j*resolution < map_min_y || y + j*resolution > map_max_y){
+            continue;
+          }
+          // printf("x: %f, y: %f\n", x + i*resolution, y + j*resolution);
+          neighbors.push_back(Eigen::Vector2f(x + i*resolution, y + j*resolution));
+        }
+      } 
+      float max_range = 3.0 * resolution / 2;
+      // Eigen::Vector2f currentLocation = Eigen::Vector2f(x, y);
+      map_.GetSceneLines(currentLocation, max_range, &lines_list);
+      // create line segment from x, y to neighbor
+      for (neighborsIter = neighbors.begin(); neighborsIter != neighbors.end(); neighborsIter++){
+        Eigen::Vector2f neighbor = *neighborsIter;  
+        float neighbor_x = neighbor.x();
+        float neighbor_y = neighbor.y();
+
+        int x_lookup = neighbor_x * discrete_multiplier;
+        int y_lookup = neighbor_y * discrete_multiplier;
+        if (visited[std::make_pair(x_lookup, y_lookup)]) {
+          continue;
+        }
+
+        bool validNeighbor = true;
+        int n_lines = lines_list.size();
+        geometry::line2f currentLine = geometry::line2f(x, y, neighbor_x, neighbor_y);
+        for (int j = 0; j < n_lines; j++){
+          // printf("Checking intersection with map line x1 %f, y1 %f, x2 %f, y2 %f\n", lines_list[j].p0.x(), lines_list[j].p0.y(), lines_list[j].p1.x(), lines_list[j].p1.y());
+          if (lines_list[j].Intersects(currentLine)){
+            // if it intersects, remove the line segment
+            printf("Path to node intersects with lines in map, skipping node x: %f, y: %f\n", neighbor_x, neighbor_y);
+            validNeighbor = false;
+            break;
+          }
+        }
+        if (validNeighbor){
+          possiblePaths.push_back(currentLine);
+        }
+      }
+      
+      int nPossiblePaths = possiblePaths.size();
+      for (int i = 0; i < nPossiblePaths; i++){
+        Eigen::Vector2f selectedWaypoint = possiblePaths[i].p1;
+
+        float next_x = selectedWaypoint.x();
+        float next_y = selectedWaypoint.y();
+        int next_x_discrete = next_x * discrete_multiplier;
+        int next_y_discrete = next_y * discrete_multiplier;
+
+        float heuristicDistance = (selectedWaypoint - nav_goal_loc_).norm();
+        float distanceToNode = (selectedWaypoint - currentLocation).norm();
+        searchQueue.Push(selectedWaypoint, -1.0 * (actualDistanceSoFar + distanceToNode + heuristicDistance));
+        printf("Adding waypoint x: %f, y: %f\n", next_x, next_y);
+
+        // if it does not have a parent, add it to the parent map
+        if (waypointToParent.find(std::make_pair(next_x_discrete, next_y_discrete)) == waypointToParent.end()){
+          printf("Adding parent for waypoint x: %d, y: %d\n", next_x_discrete, next_y_discrete);
+          waypointToParent[std::make_pair(next_x_discrete, next_y_discrete)] = std::make_pair(x_discrete, y_discrete);
+        }
+      }
+      waypointIdx++;
+    }
+    if (waypoints.size() == 0) {
+      printf("No waypoints found\n");
+    }
+    else {
+      nav_goal_loc_ = waypoints[0];
+      printf("Waypoints found\n");
+    }
 }
 
 
@@ -260,7 +353,8 @@ PathOption SelectOptimalPath(vector<PathOption> path_options, Vector2f short_ter
 }
 
 void Navigation::ObstacleAvoidance() {
-  Vector2f short_term_goal(10,0);
+  // Vector2f short_term_goal(10,0);
+  Vector2f short_term_goal = nav_goal_loc_;
   // Set up initial parameters
   drive_msg_.header.stamp = ros::Time::now();
   drive_msg_.curvature = 0;
@@ -307,8 +401,6 @@ void Navigation::ObstacleAvoidance() {
                                 local_viz_msg_);
     visualization::DrawCross(p.closest_point, 0.1, 0xFF0000, local_viz_msg_);
     OneDTOC(p, short_term_goal);
-    
-    viz_pub_.publish(local_viz_msg_);
 }
 
 PathOption Navigation::GetFreePathLength(PathOption p, Eigen::Vector2f short_term_goal){
@@ -396,8 +488,13 @@ PathOption Navigation::GetFreePathLength(PathOption p, Eigen::Vector2f short_ter
 }
 
 void Navigation::OneDTOC(PathOption p, Vector2f stg){
-  float dist_to_travel = p.free_path_length - 0.2;
-  // float dist_to_travel = (stg - p.closest_point).norm();
+  // float dist_to_travel = p.free_path_length - 0.2;
+  // float w1 = 0.5;
+  // float w2 = 0.5;
+  // float fplVal = p.free_path_length -0.2;
+  // float dist_to_travel = fplVal - 0.2;
+  // float dist_to_travel = fplVal * w1 + (stg - p.closest_point).norm();
+  float dist_to_travel = (stg - p.closest_point).norm();
   float curvature = p.curvature;
   float speed = robot_vel_.norm();
   drive_msg_.curvature = curvature;
@@ -419,7 +516,7 @@ void Navigation::OneDTOC(PathOption p, Vector2f stg){
                                   0xFF0000,
                                   true,
                                   local_viz_msg_);
-  drive_pub_.publish(drive_msg_);
+  // drive_pub_.publish(drive_msg_);
   viz_pub_.publish(local_viz_msg_);
 }
 
@@ -430,7 +527,7 @@ void Navigation::Run() {
   visualization::ClearVisualizationMsg(local_viz_msg_);
   visualization::ClearVisualizationMsg(global_viz_msg_);
 
-  // If odometry has not been initialized, we can't do anything.
+  // If odometry has not been initialized, we can"t do anything.
   if (!odom_initialized_) return;
 
   // The control iteration goes here. 
@@ -443,6 +540,47 @@ void Navigation::Run() {
   ObstacleAvoidance();
   // ObstacleAvoidance();
   // The latest observed point cloud is accessible via "point_cloud_"
+
+  // Determine if we already reached a waypoint
+  if (waypoints.size() > 0){
+    Eigen::Vector2f waypoint = waypoints[0];
+    float distance = (waypoint - robot_loc_).norm();
+    if (distance < 3){
+      waypoints.erase(waypoints.begin());
+      nav_goal_loc_ = waypoints[0];
+    }
+  }
+
+  // Draw waypoints from A*
+  // iterate over waypoints
+  vector<Eigen::Vector2f>::iterator iter;
+  Eigen::Vector2f previousWaypoint = Eigen::Vector2f(0, 0);
+  for (iter = waypoints.begin(); iter != waypoints.end(); iter++){
+    Eigen::Vector2f waypoint = *iter;
+    // swap out x, y
+    float x = waypoint.x();
+    float y = waypoint.y();
+    // convert from global frame to robot frame
+    float rotation = robot_angle_;
+    float translationX = robot_loc_.x();
+    float translationY = robot_loc_.y();
+    float newX = cos(rotation) * (x - translationX) + sin(rotation) * (y - translationY);
+    float newY = -sin(rotation) * (x - translationX) + cos(rotation) * (y - translationY);
+    Eigen::Vector2f robot_frame_waypoint = Eigen::Vector2f(newX, newY);
+    visualization::DrawCross(robot_frame_waypoint, 0.15, 0x000000, local_viz_msg_);
+    // draw line to waypoint
+    visualization::DrawLine(previousWaypoint, robot_frame_waypoint, 0x000000, local_viz_msg_);
+    previousWaypoint = robot_frame_waypoint;
+  }
+
+  // Eigen::Vector2f waypoint = Eigen::Vector2f(0, 0);
+  // visualization::DrawCross(waypoint, 0.4, 0x000000, local_viz_msg_);
+
+
+  //Eigen::Vector2f origin = Eigen::Vector2f(0, 0);
+  //Eigen::Vector2f goal = Eigen::Vector2f(10, 10);
+  //visualization::DrawLine(origin, goal, 0x00FF00, local_viz_msg_);
+  viz_pub_.publish(local_viz_msg_);
 
   // Eventually, you will have to set the control values to issue drive commands:
   // drive_msg_.curvature = ...;

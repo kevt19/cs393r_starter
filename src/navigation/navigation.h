@@ -71,7 +71,6 @@ class Navigation {
   void OneDTOC(PathOption p, Eigen::Vector2f stg);
 
  private:
-  std::map<std::pair<int, int>, bool> visited;
   std::vector<Eigen::Vector2f> waypoints;
   // Whether odometry has been initialized.
   bool odom_initialized_;

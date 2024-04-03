@@ -55,6 +55,18 @@ class SimpleQueue {
     values_.insert(values_.end(), make_pair(v, p));
   }
 
+  // Retreive the value with the highest priority.
+  pair<Value, Priority> PopWithPriority() {
+    if (values_.empty()) {
+      fprintf(stderr, "ERROR: Pop() called on an empty queue!\n");
+      exit(1);
+    }
+    Sort();
+    pair<Value, Priority> v = values_.back();
+    values_.resize(values_.size() - 1);
+    return v;
+  }
+
   // Sorts the priorities.
   void Sort() {
     static const auto comparator = 
