@@ -394,13 +394,16 @@ void Navigation::ObservePointCloud(const vector<Vector2f>& cloud,
 
 PathOption SelectOptimalPath(vector<PathOption> path_options, Vector2f short_term_goal){
   PathOption result;
-  float w_dist_to_goal = -0.50;
+  float w_dist_to_goal = -2.0;
   float w_clearance = 5;
   result.free_path_length = 0;
   result.clearance = 0;
   result.curvature = 0;
   float max_score = -100000.0;
   for(auto p : path_options){
+    if (fabs(p.curvature) < kEpsilon){
+      continue;
+    }
     float distance = (p.closest_point - short_term_goal).norm();
     float score = p.free_path_length + w_clearance*p.clearance + w_dist_to_goal*distance;
     if (score > max_score){
@@ -413,8 +416,23 @@ PathOption SelectOptimalPath(vector<PathOption> path_options, Vector2f short_ter
 }
 
 void Navigation::ObstacleAvoidance() {
-  Vector2f short_term_goal(10,0);
+  // Vector2f short_term_goal(10,0);
+  float goal_x = nav_goal_loc_.x();
+  float goal_y = nav_goal_loc_.y();
+  // convert from global frame to robot frame
+  float rotation = robot_angle_;
+  float translationX = robot_loc_.x();
+  float translationY = robot_loc_.y();
+  float newX = cos(rotation) * (goal_x - translationX) + sin(rotation) * (goal_y - translationY);
+  float newY = -sin(rotation) * (goal_x - translationX) + cos(rotation) * (goal_y - translationY);
+  Eigen::Vector2f short_term_goal = Eigen::Vector2f(newX, newY);
+
   // Vector2f short_term_goal = nav_goal_loc_;
+  // float x = short_term_goal.x();
+  // float y = short_term_goal.y();
+  // short_term_goal = Eigen::Vector2f(x, y);
+
+  // let's correct it to be in robots frame of view
   // Set up initial parameters
   drive_msg_.header.stamp = ros::Time::now();
   drive_msg_.curvature = 0;
@@ -603,7 +621,7 @@ void Navigation::Run() {
   if (waypoints.size() > 0){
     Eigen::Vector2f waypoint = waypoints[0];
     float distance = (waypoint - robot_loc_).norm();
-    if (distance < 3){
+    if (distance < 1){
       waypoints.erase(waypoints.begin());
       nav_goal_loc_ = waypoints[0];
     }
