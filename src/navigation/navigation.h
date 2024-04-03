@@ -24,8 +24,7 @@
 #include "eigen3/Eigen/Dense"
 
 #include "vector_map/vector_map.h"
-
-#include "simple_queue.h"
+#include "latency_compensation.h"
 
 #ifndef NAVIGATION_H
 #define NAVIGATION_H
@@ -36,24 +35,41 @@ namespace ros {
 
 namespace navigation {
 
-struct Control{
-  float velocity;
-  float curvature;
-  double time;
-};
-
-struct Odometry{
-  Eigen::Vector2f loc;
-  float omega;
-};
-
 struct PathOption {
-  float curvature;
-  float clearance;
-  float free_path_length;
-  Eigen::Vector2f obstruction;
-  Eigen::Vector2f closest_point;
+  float curvature = 0;
+  float clearance = 10;
+  float free_path_length = 100;
+  Eigen::Vector2f obstruction = Eigen::Vector2f::Zero();
+  Eigen::Vector2f closest_point = Eigen::Vector2f::Zero();
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+};
+
+struct NavigationParams {
+  // frequency
+  float dt = .05f;
+  // max velocity
+  float max_vel = 1.0f;
+  // max acceleration
+  float max_accel = 4.0f;
+  float max_decel = 4.0f;
+  // max angular velocity
+  float max_omega = 1.0f;
+  // max angular acceleration
+  float max_alpha = 1.0f;
+  // max curvature
+  float max_curvature = 1.0f;
+  // safety margin
+  float safety_margin = 0.1f;
+
+  // robot dimensions
+  float  width = 0.281f;
+  float  length = 0.535f;
+  float  wheelbase = 0.324f;
+  float  base_link_offset = 0.106f; // make this 0 for now
+
+  // delays
+  float actuation_latency = 0.2f;
+  float observation_latency = 0.05f;
 };
 
 class Navigation {
@@ -71,36 +87,22 @@ class Navigation {
                       const Eigen::Vector2f& vel,
                       float ang_vel);
 
-  float ComputeScore(float free_path_length, float clearance, float distance_to_goal);
-
-  float ComputeFreePathLength(double curvature, const std::vector<Eigen::Vector2f>& cloud);
-
-  float ComputeDistanceToGoal(double curvature, double free_path_length, Odometry& odometry);
-
-  float ComputeClearance(double curvature, double free_path_length, const std::vector<Eigen::Vector2f>& cloud);
-
-  void FindBestPath(double& target_curvature, double& target_free_path_l, Odometry& odometry, const std::vector<Eigen::Vector2f>& cloud);
-
-
-
-  std::vector<Eigen::Vector2f> CompensatePointCloud(const std::vector<Eigen::Vector2f>& cloud, const Odometry& odometry);
-
   // Updates based on an observed laser scan
   void ObservePointCloud(const std::vector<Eigen::Vector2f>& cloud,
                          double time);
-
-  Odometry CompensateLatencyLoc();
-
-  // Move forward a specified distance 
-  double MoveForward(double free_path_l);
 
   // Main function called continously from main
   void Run();
   // Used to set the next target pose.
   void SetNavGoal(const Eigen::Vector2f& loc, float angle);
 
- private:
+  // // Set the latency compensation object.
+  void SetLatencyCompensation(LatencyCompensation* latency_compensation);
 
+  Control GetCartesianControl(float velocity, float curvature, double time);
+
+ private:
+  std::vector<Eigen::Vector2f> waypoints;
   // Whether odometry has been initialized.
   bool odom_initialized_;
   // Whether localization has been initialized.
@@ -123,6 +125,8 @@ class Navigation {
   float odom_start_angle_;
   // Latest observed point cloud.
   std::vector<Eigen::Vector2f> point_cloud_;
+  // distance traveled
+  float distance_traveled_ = 0.0f;
 
   // Whether navigation is complete.
   bool nav_complete_;
@@ -133,9 +137,13 @@ class Navigation {
   // Map of the environment.
   vector_map::VectorMap map_;
 
-  // mantains the past controls sent: velocity, omega, time
-  std::vector<Control> past_controls_;
+  // robot config
+  NavigationParams robot_config_;
+
+  // Latency compensation
+  LatencyCompensation* latency_compensation_;
 };
+
 
 }  // namespace navigation
 

@@ -60,9 +60,16 @@ DEFINE_double(k3, 0.15, "Weighting factor for how much translation affects rotat
 DEFINE_double(k4, 0.15, "Weighting factor for how much rotation affects rotation uncertainty");
 
 DEFINE_double(stddev, 0.05, "LiDAR Sensor Noise, 0.05m - 1m");
-DEFINE_double(gamma, 0.5, "Ray correlation [1/num_particles,1]");
+DEFINE_double(gamma, 0.1, "Ray correlation [1/num_particles,1]");
 DEFINE_double(d_long, 1, "Used in Observation Likelihood Model, has to be higher than d_short, 1m - 1.5m");
 DEFINE_double(d_short, 0.2, "Used in Observation Likelihood Model, around .2m - .5m");
+
+DEFINE_double(std_dev_init_t, 0.33, "Std deviation of noise added to initial points' location");
+DEFINE_double(std_dev_init_r, 0.2, "Std deviation of noise added to initial points' rotation");
+
+DEFINE_double(pct_best_particles, 0.1, "Percentage of particles to consider when getting location of car");
+
+DEFINE_double(min_dist_for_update, 0.2, "Distance the car must travel before an update and resample can occur");
 
 namespace particle_filter {
 
@@ -79,7 +86,7 @@ void ParticleFilter::GetParticles(vector<Particle>* particles) const {
 
 void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
                                             const float angle,
-                                            int num_ranges,
+                                            int num_ranges_full,
                                             float range_min,
                                             float range_max,
                                             float angle_min,
@@ -87,7 +94,7 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
                                             vector<Vector2f>* scan_ptr,
                                             vector<double>* ranges_ptr) {
 
-  // Note: The returned values must be set using the `scan` variable:
+  float num_ranges = num_ranges_full/23; // Creates 47 points out of 1081
   vector<Vector2f>& scan = *scan_ptr;
   scan.resize(num_ranges);
 
@@ -119,11 +126,16 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
     theta += angle_increment;
   }
 
+  // This will hold the index into map_.lines for the map line that each ray intersects
+  vector<size_t> shortest_intersecting_map_line_indices;
+  shortest_intersecting_map_line_indices.resize(ray_line_segments.size());
+
   ////// Obtains the closest intersection point for each ray line
   for (size_t i = 0; i < ray_line_segments.size(); i++)
   {
     line2f ray_line = ray_line_segments[i];
     vector<Vector2f> intersection_list; // Initialize a vector of intersection points
+    vector<size_t> intersecting_map_line_indices; // Keep track of which map lines have been intersected with
     //// Iterate through every "map line" in "vector map"
     for (size_t j = 0; j < map_.lines.size(); ++j) 
     {
@@ -133,6 +145,7 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
       if (map_line.Intersection(ray_line, &intersection_point)) 
       {
         intersection_list.push_back(intersection_point);
+        intersecting_map_line_indices.push_back(j);
       }
     }
 
@@ -140,8 +153,10 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
     scan[i] = Vector2f(range_max, 0);
     float smallest = range_max;
     ranges[i] = smallest;
-    for (Vector2f point: intersection_list)
+    for (size_t p = 0; p < intersection_list.size(); p++)
     {
+      Vector2f point = intersection_list[p];
+
       float point_distance = (point - laser_loc).norm();
       if (point_distance < smallest)
       {
@@ -149,8 +164,15 @@ void ParticleFilter::GetPredictedPointCloud(const Vector2f& loc,
         scan[i] = point;
 
         ranges[i] = smallest;
+
+        shortest_intersecting_map_line_indices[i] = intersecting_map_line_indices[p];
       }
     }
+  }
+
+  // Place the interesecting map line indices into a set to avoid repeats
+  for(auto midx : shortest_intersecting_map_line_indices){
+    intersecting_map_indices_.insert(midx);
   }
 }
 
@@ -165,27 +187,30 @@ void ParticleFilter::Update(const vector<float>& ranges,
   vector<double> predicted_ranges;
   GetPredictedPointCloud(p_ptr->loc, p_ptr->angle, ranges.size(), range_min, range_max, angle_min, angle_max, &predicted_scan, &predicted_ranges);
   double log_likelihood = 0;
-  for (size_t i = 0; i < ranges.size(); i++)
+
+  int k = 0;
+  for (size_t i = 0; i < ranges.size(); i += 23)
   {
-    if (ranges[i] < range_min && ranges[i] > range_max){
+    if (ranges[i] < range_min || ranges[i] > range_max){
       log_likelihood += 0;
     }
 
-    else if (ranges[i] < predicted_ranges[i] - FLAGS_d_short){
+    else if (ranges[i] < predicted_ranges[k] - FLAGS_d_short){
       log_likelihood += -(pow(FLAGS_d_short,2)/pow(FLAGS_stddev,2));
     }
 
-    else if (ranges[i] > predicted_ranges[i] + FLAGS_d_long){
+    else if (ranges[i] > predicted_ranges[k] + FLAGS_d_long){
       log_likelihood += -(pow(FLAGS_d_long,2))/(pow(FLAGS_stddev,2));
     }
 
     else{
-      log_likelihood += FLAGS_gamma * -(pow((ranges[i] - predicted_ranges[i]),2))/(pow(FLAGS_stddev,2));
+      log_likelihood += FLAGS_gamma * -(pow((ranges[i] - predicted_ranges[k]),2))/(pow(FLAGS_stddev,2));
     }
+    k += 1;
 
     // log_likelihood +=  FLAGS_gamma * (-0.5) * (pow(ranges[i] - predicted_ranges[i], 2) / pow(FLAGS_stddev, 2));  // Simple Version
   }
-  p_ptr->weight = 1 / abs(log_likelihood);
+  p_ptr->weight = abs(log_likelihood);
 }
 
 void ParticleFilter::Resample() {
@@ -230,8 +255,22 @@ void ParticleFilter::ObserveLaser(const vector<float>& ranges,
   // A new laser scan observation is available (in the laser frame)
   // Call the Update and Resample steps as necessary.
 
+  if(dist_traveled_since_update_ < FLAGS_min_dist_for_update){
+    return;
+  }
+  dist_traveled_since_update_ = 0.0;
+
+  double highest_log_likelihood = 0;
+  intersecting_map_indices_.clear();
   for(auto& particle : particles_){
     Update(ranges, range_min, range_max, angle_min, angle_max, &particle);
+    if(particle.weight > highest_log_likelihood){
+      highest_log_likelihood = particle.weight;
+    }
+  }
+
+  for(auto& particle : particles_){
+    particle.weight = highest_log_likelihood / particle.weight;
   }
 
   Resample();
@@ -251,49 +290,106 @@ void ParticleFilter::Predict(const Vector2f& odom_loc,
     odom_initialized_ = true;
   }
 
-  // Convert the robot's pose in odom frame to be in map frame
+  // Convert the robot's pose in odom frame to be in baselink frame
   Eigen::Rotation2Df r_odom_to_baselink(-prev_odom_angle_);
   Vector2f delta_baselink = r_odom_to_baselink * (odom_loc - prev_odom_loc_);
-  Eigen::Rotation2Df r_map_to_baselink(prev_map_angle_);
-  Vector2f map_loc = prev_map_loc_ + r_map_to_baselink * delta_baselink;
-  float delta_theta_baselink = odom_angle - prev_odom_angle_;
-  float map_angle = prev_map_angle_ + delta_theta_baselink;
+  float delta_theta_baselink = (odom_angle - prev_odom_angle_);
+  while (delta_theta_baselink > 3.14159) delta_theta_baselink -= 2 * 3.14159;
+  while (delta_theta_baselink < -3.14159) delta_theta_baselink += 2 * 3.14159; 
 
-  // Calculate change in pose in map frame
-  float delta_x = map_loc[0] - prev_map_loc_[0];
-  float delta_y = map_loc[1] - prev_map_loc_[1];
-  float delta_theta = map_angle - prev_map_angle_;
+  // Possible anomolous odometry reading, ignore it
+  if(delta_baselink.norm() > 0.5 || abs(delta_theta_baselink) > (3.14159 / 2.0)){
+    cout << "BAD ODOM" << endl;
+    return;
+  }
+
+  // Add to the distance the robot has traveled since the last update
+  dist_traveled_since_update_ += delta_baselink.norm();
+
+  // Calculate change in pose for std devs
+  float delta_x_odom = odom_loc[0] - prev_odom_loc_[0];
+  float delta_y_odom = odom_loc[1] - prev_odom_loc_[1];
+  float delta_theta_odom = odom_angle - prev_odom_angle_;
+  while (delta_theta_odom > 3.14159) delta_theta_odom -= 2 * 3.14159;
+  while (delta_theta_odom < -3.14159) delta_theta_odom += 2 * 3.14159; 
 
   // Determine uncertainty for translation motion
-  float translation_uncertainty_t = FLAGS_k1 * sqrt(delta_x * delta_x + delta_y * delta_y);
-  float rotation_uncertainty_t = FLAGS_k2 * abs(delta_theta);
+  float translation_uncertainty_t = FLAGS_k1 * sqrt(delta_x_odom * delta_x_odom + delta_y_odom * delta_y_odom);
+  float rotation_uncertainty_t = FLAGS_k2 * abs(delta_theta_odom);
   float std_dev_t = translation_uncertainty_t + rotation_uncertainty_t;
 
   // Determine uncertainty for rotational motion
-  float translation_uncertainty_r = FLAGS_k3 * sqrt(delta_x * delta_x + delta_y * delta_y);
-  float rotation_uncertainty_r = FLAGS_k4 * abs(delta_theta);
+  float translation_uncertainty_r = FLAGS_k3 * sqrt(delta_x_odom * delta_x_odom + delta_y_odom * delta_y_odom);
+  float rotation_uncertainty_r = FLAGS_k4 * abs(delta_theta_odom);
   float std_dev_r = translation_uncertainty_r + rotation_uncertainty_r;
 
+  vector<size_t> intersecting_particle_indices;
+  vector<size_t> non_intersecting_particle_indices;
+
   // Apply some random noise to each particle based on a simple motion model
-  for (auto &particle : particles_) {
+  for (size_t i = 0; i < particles_.size(); i++) {
+    auto &particle = particles_[i];
+    // Get the particles position in map frame
+    Eigen::Rotation2Df r_map_to_baselink(particle.angle);
+    Vector2f map_loc = particle.loc + r_map_to_baselink * delta_baselink;
+    float map_angle = particle.angle + delta_theta_baselink;
+
+    // Generate some noise
     float x_noise = rng_.Gaussian(0.0, std_dev_t);
     float y_noise = rng_.Gaussian(0.0, std_dev_t);
     float theta_noise = rng_.Gaussian(0.0, std_dev_r);
 
+    // Apply noise to the deltas
+    float delta_x = map_loc[0] - particle.loc[0];
+    float delta_y = map_loc[1] - particle.loc[1];
+    float delta_theta = map_angle - particle.angle;
     float noisy_delta_x = delta_x + x_noise;
     float noisy_delta_y = delta_y + y_noise;
     float noisy_delta_theta = delta_theta + theta_noise;
 
+    Vector2f prev_particle_loc = particle.loc;
+
+    // Change the particles location
     particle.loc[0] += noisy_delta_x;
     particle.loc[1] += noisy_delta_y;
     particle.angle += noisy_delta_theta;
+
+    // Determine if the particle traveled through a wall, and if so remember its index
+    line2f particle_travel_line(prev_particle_loc[0], prev_particle_loc[1], particle.loc[0], particle.loc[1]);
+    bool intersection_found = false;
+    for(auto map_idx : intersecting_map_indices_){
+      const line2f map_line = map_.lines[map_idx];
+      Vector2f intersection_point;
+      if (map_line.Intersection(particle_travel_line, &intersection_point)) {
+        intersecting_particle_indices.push_back(i);
+        intersection_found = true;
+        break;
+      }
+    }
+    if(!intersection_found){
+      non_intersecting_particle_indices.push_back(i);
+    }
+  }
+
+  // For each particle that traveled through a wall, change it so that it is a copy of a randomly selected particle
+  // that didn't move through a wall
+  for(int i = intersecting_particle_indices.size() - 1; i >= 0; i--){
+    cout << "INTERSECTING PARTICLE" << endl;
+    auto &intersecting_particle = particles_[i];
+
+    int sampled_idx = std::rand() % non_intersecting_particle_indices.size();
+    auto sampled_particle = particles_[sampled_idx];
+
+    intersecting_particle.loc = sampled_particle.loc;
+    intersecting_particle.angle = sampled_particle.angle;
+    intersecting_particle.weight = sampled_particle.weight;
+
+    // particles_.erase(particles_.begin() + particle_remove_indices[i]);
   }
 
   // Update previous values
   prev_odom_loc_ = odom_loc;
   prev_odom_angle_ = odom_angle;
-  prev_map_loc_ = map_loc;
-  prev_map_angle_ = map_angle;
 }
 
 void ParticleFilter::Initialize(const string& map_file,
@@ -307,15 +403,17 @@ void ParticleFilter::Initialize(const string& map_file,
   // Create num_particles random particles each starting at the car's initial position
   particles_.clear();
   for (int i = 0; i < FLAGS_num_particles; i++) {
+    float x_noise = rng_.Gaussian(0.0, FLAGS_std_dev_init_t);
+    float y_noise = rng_.Gaussian(0.0, FLAGS_std_dev_init_t);
+    float theta_noise = rng_.Gaussian(0.0, FLAGS_std_dev_init_r);
+    Vector2f t_noise(x_noise, y_noise);
+
     Particle particle;
-    particle.loc = loc;
-    particle.angle = angle;
+    particle.loc = loc + t_noise;
+    particle.angle = angle + theta_noise;
     particle.weight = 0;
     particles_.push_back(particle);
   }
-
-  prev_map_angle_ = angle;
-  prev_map_loc_ = loc;
 }
 
 void ParticleFilter::GetLocation(Eigen::Vector2f* loc_ptr, 
@@ -325,16 +423,31 @@ void ParticleFilter::GetLocation(Eigen::Vector2f* loc_ptr,
   // Compute the best estimate of the robot's location based on the current set
   // of particles. The computed values must be set to the `loc` and `angle`
   // variables to return them. Modify the following assignments:
-  Particle best_particle = particles_[0];
-  double best_weight = 0;
-  for(auto particle : particles_){
-    if(particle.weight > best_weight){
-      best_particle = particle;
-      best_weight = particle.weight;
-    }
+  std::vector<Particle> sorted_particles = particles_; 
+  std::sort(sorted_particles.begin(), sorted_particles.end(), [](const Particle& a, const Particle& b) {
+    return a.weight > b.weight;
+  });
+
+  size_t num_best_particles =  particles_.size() * FLAGS_pct_best_particles;
+
+  Vector2f loc_sum(0.0, 0.0);
+  float angle_sum_sin = 0.0;
+  float angle_sum_cos = 0.0;
+  for(size_t i = 0; i < num_best_particles; i++){
+    auto particle = sorted_particles[i];
+    loc_sum += particle.loc;
+    // Use circular mean to get the avg angle (convert from polar to cartesian, take mean, then back to polar)
+    angle_sum_sin += sin(particle.angle);
+    angle_sum_cos += cos(particle.angle); 
   }
-  loc = best_particle.loc;
-  angle = best_particle.angle;
+
+  Vector2f avg_loc = loc_sum / (float)num_best_particles;
+  float avg_sin = angle_sum_sin / (float)num_best_particles;
+  float avg_cos = angle_sum_cos / (float)num_best_particles;
+  float avg_angle = atan2(avg_sin, avg_cos);
+
+  loc = avg_loc;
+  angle = avg_angle;
 }
 
 

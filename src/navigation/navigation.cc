@@ -19,7 +19,6 @@
 */
 //========================================================================
 
-#include <cmath>
 #include "gflags/gflags.h"
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
@@ -34,17 +33,17 @@
 #include "shared/ros/ros_helpers.h"
 #include "navigation.h"
 #include "visualization/visualization.h"
-#include <iostream>
-
-// #define MAX_ACCEL 4.0
-// #define MAX_SPEED 1.0
-// #define CTRL_FREQ 20.0
+#include "simple_queue.h"
+#include "path_options.h"
+#include "latency_compensation.h"
 
 using Eigen::Vector2f;
 using amrl_msgs::AckermannCurvatureDriveMsg;
 using amrl_msgs::VisualizationMsg;
 using std::string;
 using std::vector;
+using std::max;
+using std::min;
 
 using namespace math_util;
 using namespace ros_helpers;
@@ -55,44 +54,8 @@ ros::Publisher viz_pub_;
 VisualizationMsg local_viz_msg_;
 VisualizationMsg global_viz_msg_;
 AckermannCurvatureDriveMsg drive_msg_;
-
-// Car Size Constants
-const float CAR_LENGTH = 0.50;
-const float CAR_WIDTH = 0.28;
-const float SAFETY_MARGIN = 0.1;
-const float BASE_TO_FRONT = 0.41;
-const float BACK_TO_BASE = 0.135;
-
-// Kinematic Constraints
-const float MAX_ACCEL = 4.0;
-const float MAX_SPEED = 1.0;
-const float CTRL_FREQ = 20.0;
-
 // Epsilon value for handling limited numerical precision.
 const float kEpsilon = 1e-5;
-
-// Scoring Weights
-const float w_clearance = 2;
-const float w_distance_to_goal = 0;
-const float w_free_path_length = 1;
-
-// Latency Values
-const float LATENCY = 0.125;
-const int MAX_CONTROLS_IN_LATENCY = static_cast<int>(ceil(LATENCY / (1 / CTRL_FREQ)));
-const float TIME_PER_CONTROL = 1.0 / CTRL_FREQ;
-
-// Path Search Parameters
-const float NUM_COARSE_GRAIN_POSSIBLE_PATHS = 31;
-const float MAX_COARSE_CURVATURE = 1;
-const float MIN_COARSE_CURVATURE = -1;
-const float NUM_BEST_COARSE_PATHS_TO_CONSIDER = 3;
-const float FINE_CURVATURE_SEARCH_RANGE = 0.1;
-const float NUM_FINE_GRAIN_POSSIBLE_PATHS = 11;
-
-// Clearance Parameters
-const float MAX_CLEARANCE = 3;
-const float CLEARANCE_CUTOFF = 0.95;
-
 } //namespace
 
 namespace navigation {
@@ -111,7 +74,9 @@ Navigation::Navigation(const string& map_name, ros::NodeHandle* n) :
     robot_omega_(0),
     nav_complete_(true),
     nav_goal_loc_(0, 0),
-    nav_goal_angle_(0) {
+    nav_goal_angle_(0),
+    latency_compensation_(new LatencyCompensation(0, 0, 0)) 
+  {
   map_.Load(GetMapFileFromName(map_name));
   drive_pub_ = n->advertise<AckermannCurvatureDriveMsg>(
       "ackermann_curvature_drive", 1);
@@ -123,7 +88,266 @@ Navigation::Navigation(const string& map_name, ros::NodeHandle* n) :
   InitRosHeader("base_link", &drive_msg_.header);
 }
 
-void Navigation::SetNavGoal(const Eigen::Vector2f& loc, float angle) {
+
+void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
+    // run A* and generate a set of waypoints
+    nav_goal_loc_ = loc;
+    nav_goal_angle_ = angle; // ignore angle for now
+    waypoints.clear();
+    // discretize the map
+    float resolution = 0.5;
+    float discrete_multiplier = 1.0 / resolution; // makes it discrete
+
+    // convert robot_loc and nav_goal_loc to discrete
+    int robot_x_discrete = robot_loc_.x() * discrete_multiplier;
+    int robot_y_discrete = robot_loc_.y() * discrete_multiplier;
+    int goal_x_discrete = nav_goal_loc_.x() * discrete_multiplier;
+    int goal_y_discrete = nav_goal_loc_.y() * discrete_multiplier;
+    // convert back
+    float robot_x = robot_x_discrete / discrete_multiplier;
+    float robot_y = robot_y_discrete / discrete_multiplier;
+    float goal_x = goal_x_discrete / discrete_multiplier;
+    float goal_y = goal_y_discrete / discrete_multiplier;
+
+    Eigen::Vector2f start = Eigen::Vector2f(robot_x, robot_y);
+    Eigen::Vector2f goal = Eigen::Vector2f(goal_x, goal_y);
+
+    float map_min_x = 1000.0;
+    float map_min_y = 1000.0;
+    float map_max_x = -1000.0;
+    float map_max_y = -1000.0;
+
+    vector<geometry::line2f> all_map_lines;
+    float max_map_range = 1000.0;
+    map_.GetSceneLines(robot_loc_, max_map_range, &all_map_lines);
+    int all_map_lines_size = all_map_lines.size();
+    for (int i = 0; i < all_map_lines_size; i++){
+      Eigen::Vector2f p0 = all_map_lines[i].p0;
+      Eigen::Vector2f p1 = all_map_lines[i].p1;
+      map_min_x = min(map_min_x, min(p0.x(), p1.x()));
+      map_min_y = min(map_min_y, min(p0.y(), p1.y()));
+      map_max_x = max(map_max_x, max(p0.x(), p1.x()));
+      map_max_y = max(map_max_y, max(p0.y(), p1.y()));
+    }
+
+    // let's also make dummy walls
+    // try 0.5 -> 0.0, decreasing by 0.5
+    float dummyValue = 0.75;
+    while (dummyValue > 0.0) {
+      vector<geometry::line2f> lines_list;
+      // clear map
+      std::map<std::pair<int, int>, bool> visited;
+      std::map<std::pair<int, int>, float> distanceFromOrigin;
+      std::map<std::pair<int, int>, std::pair<int, int>> waypointToParent;
+      vector<Eigen::Vector2f> neighbors;
+      vector<geometry::line2f> mapWallsWithDummys;
+      for (int i = 0; i < all_map_lines_size; i++){
+        Eigen::Vector2f p0 = all_map_lines[i].p0;
+        Eigen::Vector2f p1 = all_map_lines[i].p1;
+        geometry::line2f line = geometry::line2f(p0, p1);
+        mapWallsWithDummys.push_back(line);
+
+        // add dummy walls
+        for (int j = -1; j <= 1; j++){
+          for (int k = -1; k <= 1; k++){
+            if (j == 0 && k == 0){
+              continue;
+            }
+            Eigen::Vector2f p0_dummy = Eigen::Vector2f(p0.x() + j*dummyValue, p0.y() + k*dummyValue);
+            Eigen::Vector2f p1_dummy = Eigen::Vector2f(p1.x() + j*dummyValue, p1.y() + k*dummyValue);
+            geometry::line2f line_dummy = geometry::line2f(p0_dummy, p1_dummy);
+            mapWallsWithDummys.push_back(line_dummy);
+          }
+        }
+      }
+
+      int maxIterations = 10000000;
+      // Loop until we reach goal or max iterations
+      std::vector<Eigen::Vector2f>::iterator neighborsIter;
+      std::vector<geometry::line2f> possiblePaths;
+      SimpleQueue<Eigen::Vector2f, float> searchQueue;
+      // add first node to queue
+      // initial distance
+      float distance = (goal - start).norm();
+      float x = start.x();
+      float y = start.y();
+      int x_discrete = x * discrete_multiplier;
+      int y_discrete = y * discrete_multiplier;
+      x = x_discrete / discrete_multiplier;
+      y = y_discrete / discrete_multiplier;
+      Eigen::Vector2f currentLocation = Eigen::Vector2f(x, y);
+
+      searchQueue.Push(start, distance);
+
+      int waypointIdx = 0;
+      // bool finished = false;
+      while (!searchQueue.Empty() && waypointIdx < maxIterations) {
+        // dequeue and get x, y
+        // std::pair<std::vector<Eigen::Vector2f>, Priority> currentPath = searchQueue.PopWithPriority();
+        std::pair<Eigen::Vector2f, float> poppedVal = searchQueue.PopWithPriority();
+        currentLocation = poppedVal.first;
+        float currentCost = -1.0 * poppedVal.second;
+        float estimatedDistance = (currentLocation - goal).norm();
+        float actualDistanceSoFar = currentCost - estimatedDistance;
+
+        x = currentLocation.x();
+        y = currentLocation.y();
+        x_discrete = x * discrete_multiplier;
+        y_discrete = y * discrete_multiplier;
+        x = x_discrete / discrete_multiplier;
+        y = y_discrete / discrete_multiplier;
+
+        visited[std::make_pair(x_discrete, y_discrete)] = true;
+
+        // check if we already reached the goal
+        // Eigen::Vector2f wp = Eigen::Vector2f(x, y);
+        if ((currentLocation - goal).norm() < resolution){
+          printf("Current location x: %f, y: %f\n", x, y);
+          printf("Reached goal\n");
+
+          // edge case: robot is already at goal, then just return
+          if (waypointIdx == 0){
+            break;
+          }
+
+          // copy over waypoints in reverse
+          vector<Eigen::Vector2f> reversedWaypoints;
+          Eigen::Vector2f backtrackLocation = currentLocation;
+          std::pair<int, int> backtrack = std::make_pair(x_discrete, y_discrete);
+          bool has_parent = true;
+          while (has_parent){
+            printf("current x: %d, y: %d\n", backtrack.first, backtrack.second);
+            x_discrete = backtrack.first;
+            y_discrete = backtrack.second;
+            x = x_discrete / discrete_multiplier;
+            y = y_discrete / discrete_multiplier;
+
+            backtrackLocation = Eigen::Vector2f(x, y);
+
+            reversedWaypoints.push_back(backtrackLocation);
+
+            // try to find parent
+            if (waypointToParent.find(std::make_pair(x_discrete, y_discrete)) == waypointToParent.end()){
+              has_parent = false;
+              break;
+            }
+            backtrack = waypointToParent[std::make_pair(x_discrete, y_discrete)];
+          }
+          // copy over waypoints in reverse
+          std::vector<Eigen::Vector2f>::iterator waypointsIter;
+          for (waypointsIter = reversedWaypoints.end() - 1; waypointsIter != reversedWaypoints.begin() - 1; waypointsIter--){
+            waypoints.push_back(*waypointsIter);
+          }
+          break;
+        }
+        neighbors.clear();
+        possiblePaths.clear();
+
+        // check if current x, y is in the map
+        for (int i = -1; i <= 1; i++){
+          for (int j = -1; j <= 1; j++){
+            if (i == 0 && j == 0){
+              continue;
+            }
+            if (x + i*resolution < map_min_x || x + i*resolution > map_max_x || y + j*resolution < map_min_y || y + j*resolution > map_max_y){
+              continue;
+            }
+            neighbors.push_back(Eigen::Vector2f(x + i*resolution, y + j*resolution));
+          }
+        } 
+        float max_range = 3.0 * resolution / 2;
+
+        const float x_min = x - max_range;
+        const float y_min = y - max_range;
+        const float x_max = x + max_range;
+        const float y_max = y + max_range;
+        lines_list.clear();
+        for (const geometry::line2f& l : mapWallsWithDummys) {
+          if (l.p0.x() < x_min && l.p1.x() < x_min) continue;
+          if (l.p0.y() < y_min && l.p1.y() < y_min) continue;
+          if (l.p0.x() > x_max && l.p1.x() > x_max) continue;
+          if (l.p0.y() > y_max && l.p1.y() > y_max) continue;
+          lines_list.push_back(l);
+        }
+
+        // Eigen::Vector2f currentLocation = Eigen::Vector2f(x, y);
+        // map_.GetSceneLines(currentLocation, max_range, &lines_list);
+        // create line segment from x, y to neighbor
+        for (neighborsIter = neighbors.begin(); neighborsIter != neighbors.end(); neighborsIter++){
+          Eigen::Vector2f neighbor = *neighborsIter;  
+          float neighbor_x = neighbor.x();
+          float neighbor_y = neighbor.y();
+
+          int x_lookup = neighbor_x * discrete_multiplier;
+          int y_lookup = neighbor_y * discrete_multiplier;
+          if (visited[std::make_pair(x_lookup, y_lookup)]) {
+            continue;
+          }
+
+          bool validNeighbor = true;
+          int n_lines = lines_list.size();
+          geometry::line2f currentLine = geometry::line2f(x, y, neighbor_x, neighbor_y);
+          for (int j = 0; j < n_lines; j++){
+            // printf("Checking intersection with map line x1 %f, y1 %f, x2 %f, y2 %f\n", lines_list[j].p0.x(), lines_list[j].p0.y(), lines_list[j].p1.x(), lines_list[j].p1.y());
+            if (lines_list[j].Intersects(currentLine)){
+              // if it intersects, remove the line segment
+              validNeighbor = false;
+              break;
+            }
+          }
+          if (validNeighbor){
+            possiblePaths.push_back(currentLine);
+          }
+        }
+        
+        int nPossiblePaths = possiblePaths.size();
+        for (int i = 0; i < nPossiblePaths; i++){
+          Eigen::Vector2f selectedWaypoint = possiblePaths[i].p1;
+
+          float next_x = selectedWaypoint.x();
+          float next_y = selectedWaypoint.y();
+          int next_x_discrete = next_x * discrete_multiplier;
+          int next_y_discrete = next_y * discrete_multiplier;
+          next_x = next_x_discrete / discrete_multiplier;
+          next_y = next_y_discrete / discrete_multiplier;
+
+          // let's use actual distance for distance calculation
+          float distanceToNode = (selectedWaypoint - currentLocation).norm(); 
+          // float distanceToNode = resolution;
+          float h = (selectedWaypoint - goal).norm();
+          float g = actualDistanceSoFar + distanceToNode;
+
+          // if it does not have a parent, add it to the parent map
+          if (waypointToParent.find(std::make_pair(next_x_discrete, next_y_discrete)) == waypointToParent.end()){
+            waypointToParent[std::make_pair(next_x_discrete, next_y_discrete)] = std::make_pair(x_discrete, y_discrete);
+            distanceFromOrigin[std::make_pair(next_x_discrete, next_y_discrete)] = g;
+          }
+          else
+          {
+            // check if distance is less than current distance
+            float distanceFromExistingParent = distanceFromOrigin[std::make_pair(next_x_discrete, next_y_discrete)];
+            if (distanceFromExistingParent > g){
+              distanceFromOrigin[std::make_pair(next_x_discrete, next_y_discrete)] = g;
+              waypointToParent[std::make_pair(next_x_discrete, next_y_discrete)] = std::make_pair(x_discrete, y_discrete);
+            }
+            else{
+              g = distanceFromExistingParent; // otherwise let's use it
+            }
+          }
+          searchQueue.Push(selectedWaypoint, -1.0 * (g + h));
+        }
+        waypointIdx++;
+      }
+      if (waypoints.size() == 0) {
+        printf("No waypoints found, will try lower dummy value if > 0.0\n");
+        dummyValue -= 0.05;
+      }
+      else {
+        nav_goal_loc_ = waypoints[0];
+        printf("Waypoints found\n");
+        break;
+      }
+    }
 }
 
 void Navigation::UpdateLocation(const Eigen::Vector2f& loc, float angle) {
@@ -146,367 +370,37 @@ void Navigation::UpdateOdometry(const Vector2f& loc,
     odom_angle_ = angle;
     return;
   }
-  odom_loc_ = loc;
-  odom_angle_ = angle;
-}
+  latency_compensation_->recordObservation(loc[0], loc[1], angle, ros::Time::now().toSec());
+  Observation predictedState = latency_compensation_->getPredictedState();
+  odom_loc_ = {predictedState.x, predictedState.y};
+  odom_angle_ = predictedState.theta;
+  robot_vel_ = {predictedState.vx, predictedState.vy};
+  robot_omega_ = predictedState.omega;
 
-Odometry Navigation::CompensateLatencyLoc() {
-  float current_x = robot_loc_.x();
-  float current_y = robot_loc_.y();
-  float current_omega = robot_omega_;
-
-  double current_time = ros::Time::now().toSec();
-  double min_relevant_time = current_time - LATENCY;
-
-  // remove controls that are not relevant
-  int i = 0;
-  while (past_controls_.size() > 0 && past_controls_[i].time < min_relevant_time) {
-    past_controls_.erase(past_controls_.begin() + i);
-  }
-
-  for(const Control& control : past_controls_) {
-    float vel = control.velocity;
-    float curv = control.curvature;
-    // double time = control.time;
-
-    current_x += vel * cos(current_omega) * TIME_PER_CONTROL;
-    current_y += vel * sin(current_omega) * TIME_PER_CONTROL;
-    current_omega += vel * curv * TIME_PER_CONTROL;
-  }
-
-  Odometry odometry;
-  odometry.loc = Vector2f(current_x, current_y);
-  odometry.omega = current_omega;
-  return odometry;
-}
-
-vector<Vector2f> Navigation::CompensatePointCloud(const vector<Vector2f>& cloud, const Odometry& odometry) {
-  vector<Vector2f> compensated_cloud;
-  
-  float delta_x = odometry.loc.x() - robot_loc_.x();
-  float delta_y = odometry.loc.y() - robot_loc_.y();
-  // float delta_omega = odometry.omega - robot_omega_;
-
-  for (const auto& point : cloud) {
-    float x = point.x() - delta_x;
-    float y = point.y() - delta_y;
-    compensated_cloud.push_back(Vector2f(x, y));
-  }
-  return compensated_cloud;
+  point_cloud_ = latency_compensation_->forward_predict_point_cloud(point_cloud_, predictedState.x, predictedState.y, predictedState.theta);
 }
 
 void Navigation::ObservePointCloud(const vector<Vector2f>& cloud,
                                    double time) {
-  point_cloud_ = cloud;                                     
+  point_cloud_ = cloud;                            
 }
 
-double Navigation::MoveForward(double free_path_l){
-  double speed = robot_vel_.norm();
-  double speed_after_accel = speed + (MAX_ACCEL / CTRL_FREQ);
-
-  // Dist that would be covered before coming to a stop if brakes are maximally applied, starting at some initial speed
-  auto brake_dist = [](double initial_speed){
-    return ((initial_speed * initial_speed) / (2 * MAX_ACCEL));
-  };
-
-  // Distance that would be covered by accelerating for one time step then slamming on the brakes until a stop is reached
-  double accel_dist = (0.5 * (speed + speed_after_accel) * (1 / CTRL_FREQ)) + brake_dist(speed_after_accel);
-
-  // Distance that would be covered by cruising for one time step
-  double cruise_dist = (speed / CTRL_FREQ) + brake_dist(speed);
-  
-  if(speed < MAX_SPEED && accel_dist < free_path_l){
-    // Accelerate!
-    return MAX_SPEED;
-  }
-  else if(cruise_dist < free_path_l){
-    // Cruise!
-    return MAX_SPEED;
-  }
-  else{
-    // Slam the brakes! 
-    return 0.0;
-  }
-
+void Navigation::SetLatencyCompensation(LatencyCompensation* latency_compensation) {
+  latency_compensation_ = latency_compensation;
 }
 
-float Navigation::ComputeScore(float free_path_length, float clearance, float distance_to_goal) {
-  return w_free_path_length * free_path_length + w_clearance * clearance + w_distance_to_goal * distance_to_goal;
-}
+// Convert (velocity, curvature) to (x_dot, y_dot, theta_dot)
+Control Navigation::GetCartesianControl(float velocity, float curvature, double time) {
+  float x_dot = velocity * cos(curvature);
+  float y_dot = velocity * sin(curvature);
+  float theta_dot = velocity * curvature;
 
-
-float Navigation::ComputeFreePathLength(double curvature, const vector<Vector2f>& cloud){
-  double free_path_l = __DBL_MAX__;
-  Vector2f target_point(0,0);
-
-  // Special case for going forward
-  if(abs(curvature) < kEpsilon){
-    // Determine which points are possible obstacles
-    vector<Vector2f> possible_obstacles;
-    for(auto point : cloud){
-      if(abs(point.y()) <= ((CAR_WIDTH / 2) + SAFETY_MARGIN)){
-        possible_obstacles.push_back(point);
-      }
-    }
-
-    // Determine which possible obstacle is closest, and find that obstacle's free path length
-    for(auto point : possible_obstacles){
-      double cur_free_path_l = point.x() - (BASE_TO_FRONT + SAFETY_MARGIN);
-      if (cur_free_path_l < free_path_l){
-        free_path_l = cur_free_path_l;
-        target_point = point;
-      }
-    }
-
-    // If path is too long or there are no obstacles, go up to the goal
-    if(free_path_l > nav_goal_loc_.norm() || possible_obstacles.size() <= 0){
-      free_path_l = nav_goal_loc_.norm();
-    }
-  }
-
-  // Otherwise, the car is turning
-  else{
-    double radius = 1 / curvature;
-    Vector2f center_of_turn(0, radius);
-    // Limit of how long the free path length can be before getting further away from the goal
-    double fpl_lim = atan(nav_goal_loc_.norm() / abs(radius)) * abs(radius);
-    double r1 = abs(radius) - ((CAR_WIDTH / 2) + SAFETY_MARGIN);
-    double r2 = Vector2f(BASE_TO_FRONT + SAFETY_MARGIN, abs(radius) - ((CAR_WIDTH / 2) + SAFETY_MARGIN)).norm();
-    double r3 = Vector2f(BASE_TO_FRONT + SAFETY_MARGIN, abs(radius) + ((CAR_WIDTH / 2) + SAFETY_MARGIN)).norm();
-    
-
-    // Determine which points are possible obstacles
-    vector<Vector2f> possible_obstacles;
-    for(auto point : cloud){
-      double r_p = (point - center_of_turn).norm();
-      
-      double theta = atan2(point.x(), (radius - point.y()));
-      if(r_p >= r1 && r_p <= r3 && theta > 0){
-        possible_obstacles.push_back(point);
-      };
-    }
-
-    // Determine which possible obstacle is closest, and find that obstacle's free path length
-    for(auto point : possible_obstacles){
-      double r_p = (point - center_of_turn).norm();
-      double cur_free_path_l = -1;
-
-      if(r_p >= r1 && r_p <= r2){
-        float omega = acos(((r_p*r_p) + (radius*radius) - (point.norm()*point.norm()))/(2*r_p*abs(radius)));
-        float f = (r_p - r1)/(r2 - r1);
-        float x = f*(BASE_TO_FRONT + SAFETY_MARGIN);
-        Eigen::Vector2f p_c_vector = {x, CAR_WIDTH/2 + SAFETY_MARGIN};
-        float p_c = p_c_vector.norm();
-        float psi = acos(((r_p*r_p) + (radius*radius) - (p_c*p_c))/(2*r_p*abs(radius)));
-        float theta = omega - psi;
-        cur_free_path_l = std::abs(radius)*(theta);
-      }
-      else if(r_p > r2 && r_p <= r3){
-        float omega = acos(((r_p*r_p) + (radius*radius) - (point.norm()*point.norm()))/(2*r_p*abs(radius)));
-        float y = r_p - (CAR_WIDTH/2 +SAFETY_MARGIN + r2);
-        Vector2f p_c_vector = {BASE_TO_FRONT + SAFETY_MARGIN, y};
-        float p_c = p_c_vector.norm();
-        float psi = acos(((r_p*r_p) + (radius*radius) - (p_c*p_c))/(2*r_p*abs(radius)));
-        float theta = omega - psi;
-        cur_free_path_l = std::abs(radius)*(theta);
-      }
-      else{
-        std::cout << "WHAT" << std::endl;
-      }
-
-      // Adjust to limit FPL to closest point of approach to the goal
-      if(cur_free_path_l > fpl_lim){
-        cur_free_path_l = fpl_lim;
-      }
-
-      // Choose the shortest free path length
-      if (cur_free_path_l < free_path_l){
-        free_path_l = cur_free_path_l;
-        target_point = point;
-      }
-    }
-
-    // If no obstacles, go as far as possible before getting further away from the goal
-    if(possible_obstacles.size() <= 0){
-      free_path_l = fpl_lim;
-    }
-  }
-
-  if(free_path_l < 0){
-    return 0;
-  }
-  return free_path_l;
-}
-
-float Navigation::ComputeDistanceToGoal(double curvature, double free_path_length, Odometry& odometry) {
-  Eigen::Vector2f endpoint;
-
-  // Calculate where the car ends up at the end of the free path
-  if(abs(curvature) < 0.05){
-    double turning_radius = 1 / curvature;
-    double x_dist = turning_radius * cos(odometry.omega);
-    double y_dist = turning_radius * sin(odometry.omega);
-    double end_x = odometry.loc.x() + x_dist;
-    double end_y = odometry.loc.y() + y_dist;
-    endpoint = Vector2f(end_x, end_y);
-  }
-  else{
-    double radius = 1 / curvature;
-    double psi = free_path_length / abs(radius);
-    Eigen::Rotation2Df rot(psi);
-    endpoint = (rot * Vector2f(0, -radius)) + Vector2f(0, radius); 
-  }
-
-  return (nav_goal_loc_ - endpoint).norm();
-}
-
-float Navigation::ComputeClearance(double curvature, double free_path_length, const vector<Vector2f>& cloud){
-  double clearance = MAX_CLEARANCE;
-  Eigen::Vector2f clearance_point(0,0);
-
-  // Moving straight case
-  if(abs(curvature) < kEpsilon) {
-    // Determine which points will possibly affect clearance
-    vector<Vector2f> clearance_points;
-    for(auto point : cloud){
-      if(point.x() > BACK_TO_BASE && point.x() < (free_path_length + BASE_TO_FRONT + SAFETY_MARGIN) * CLEARANCE_CUTOFF && abs(point.y()) < MAX_CLEARANCE){
-        clearance_points.push_back(point);
-      }
-    }
-
-    // Determine which point is closest, and find that point's clearance
-    for(auto point : clearance_points){
-      double curr_clearance = abs(point.y()) - ((CAR_WIDTH / 2) + SAFETY_MARGIN);
-      if (curr_clearance < clearance){
-        clearance = curr_clearance;
-        clearance_point = point;
-      }
-    }
-  }
-
-  // Moving on a curve case
-  else{
-    double radius = 1 / curvature;
-    Eigen::Vector2f center_of_turn(0, radius);
-    double r1 = abs(radius) - ((CAR_WIDTH / 2) + SAFETY_MARGIN);
-    double r2 = Vector2f(BASE_TO_FRONT + SAFETY_MARGIN, abs(radius) + ((CAR_WIDTH / 2) + SAFETY_MARGIN)).norm();
-
-    // Determine which points will possibly affect clearance
-    vector<Eigen::Vector2f> clearance_points;
-    for(auto point : cloud){
-      double theta_p = atan2(point.x(), abs(radius) - point.y());
-      double omega = atan2(BASE_TO_FRONT + SAFETY_MARGIN, abs(radius) - ((CAR_WIDTH / 2) + SAFETY_MARGIN));
-      double psi = free_path_length / abs(radius);
-      double theta_max = (omega + psi) * CLEARANCE_CUTOFF;
-
-      if(abs((center_of_turn - point).norm() - abs(radius)) < MAX_CLEARANCE && theta_p > 0 && theta_p < theta_max){
-        clearance_points.push_back(point);
-      };
-    }
-
-
-    // Determine which point is closest, and find that point's clearance
-    for(auto point : clearance_points){
-      double curr_clearance;
-      if((center_of_turn - point).norm() > abs(radius)){
-        curr_clearance = (center_of_turn - point).norm() - r2;
-      }
-      else{
-        curr_clearance = r1 - (center_of_turn - point).norm();
-        // Ignore points that end up with negative clearance
-        if(curr_clearance < 0){
-          curr_clearance = MAX_CLEARANCE;
-        }
-      }
-
-      if (curr_clearance < clearance){
-        clearance = curr_clearance;
-        clearance_point = point;
-      }
-    }
-  }
-
-  // Draw point used to calculate clearance
-  visualization::DrawCross(clearance_point, 0.15, 0x00f00f, local_viz_msg_);
-
-  return clearance;
-}
-
-
-
-void Navigation::FindBestPath(double& target_curvature, double& target_free_path_l, Odometry& odometry, const vector<Vector2f>& cloud){
-  float curvature_range = MAX_COARSE_CURVATURE - MIN_COARSE_CURVATURE;
-  float incr = curvature_range / (NUM_COARSE_GRAIN_POSSIBLE_PATHS - 1);
-  float curr_curv = MIN_COARSE_CURVATURE;
-
-  struct PossiblePath{
-    double curv;
-    double fpl;
-
-    bool operator==(const PossiblePath& other) const {
-        return false;
-    }
-  };
-  SimpleQueue<PossiblePath, double> coarse_scores_queue;
-
-  // Iterate over all possible paths, scoring each one
-  for(int i = 0; i < NUM_COARSE_GRAIN_POSSIBLE_PATHS; i++){
-    double free_path_l = ComputeFreePathLength(curr_curv, cloud);
-    double clearance = ComputeClearance(curr_curv, free_path_l, cloud);
-    double goal_dist = ComputeDistanceToGoal(curr_curv, free_path_l, odometry);
-    double curr_score = ComputeScore(free_path_l, clearance, goal_dist);
-
-    PossiblePath curr_path;
-    curr_path.curv = curr_curv;
-    curr_path.fpl = free_path_l;
-    coarse_scores_queue.Push(curr_path, curr_score);
-
-    visualization::DrawPathOption(curr_path.curv, curr_path.fpl, 0, 0x0000ff, false, local_viz_msg_);
-
-
-    curr_curv += incr;
-  } 
-
-
-  SimpleQueue<PossiblePath, double> fine_scores_queue;
-
-  for(int i = 0; i < NUM_BEST_COARSE_PATHS_TO_CONSIDER; i++){
-    PossiblePath curr_coarse_path = coarse_scores_queue.Pop();
-
-    // visualization::DrawPathOption(curr_coarse_path.curv, curr_coarse_path.fpl, 0, 0x0000ff, false, local_viz_msg_);
-
-    incr = FINE_CURVATURE_SEARCH_RANGE / (NUM_FINE_GRAIN_POSSIBLE_PATHS - 1);
-    curr_curv = curr_coarse_path.curv - (FINE_CURVATURE_SEARCH_RANGE / 2.0);
-
-    for(int j = 0; j < NUM_FINE_GRAIN_POSSIBLE_PATHS; j++){
-      double free_path_l = ComputeFreePathLength(curr_curv, cloud);
-      double clearance = ComputeClearance(curr_curv, free_path_l, cloud);
-      double goal_dist = ComputeDistanceToGoal(curr_curv, free_path_l, odometry);
-      double curr_score = ComputeScore(free_path_l, clearance, goal_dist);
-
-      PossiblePath curr_path;
-      curr_path.curv = curr_curv;
-      curr_path.fpl = free_path_l;
-      fine_scores_queue.Push(curr_path, curr_score);
-
-      // visualization::DrawPathOption(curr_path.curv, curr_path.fpl, 0, 0x111111, false, local_viz_msg_);
-
-      curr_curv += incr;
-    }
-  }
-
-  PossiblePath best_path = fine_scores_queue.Pop();
-  target_curvature = best_path.curv;
-  target_free_path_l = best_path.fpl;
-
-  // visualization::DrawPathOption(target_curvature, target_free_path_l, 0, 0xff0000, false, local_viz_msg_);
+  return {x_dot, y_dot, theta_dot, time};
 }
 
 void Navigation::Run() {
-  nav_goal_loc_ = Eigen::Vector2f(5.0, 0);
-  
   // This function gets called 20 times a second to form the control loop.
-  
+
   // Clear previous visualizations.
   visualization::ClearVisualizationMsg(local_viz_msg_);
   visualization::ClearVisualizationMsg(global_viz_msg_);
@@ -514,38 +408,78 @@ void Navigation::Run() {
   // If odometry has not been initialized, we can't do anything.
   if (!odom_initialized_) return;
 
-  // Draw box around car
-  visualization::DrawLine(Vector2f(BASE_TO_FRONT, CAR_WIDTH / 2), Vector2f(BASE_TO_FRONT, -CAR_WIDTH / 2), 0xff0000, local_viz_msg_);
-  visualization::DrawLine(Vector2f(BASE_TO_FRONT, CAR_WIDTH / 2), Vector2f(-BACK_TO_BASE, CAR_WIDTH / 2), 0xff0000, local_viz_msg_);
-  visualization::DrawLine(Vector2f(BASE_TO_FRONT, -CAR_WIDTH / 2), Vector2f(-BACK_TO_BASE, -CAR_WIDTH / 2), 0xff0000, local_viz_msg_);
-  visualization::DrawLine(Vector2f(-BACK_TO_BASE, CAR_WIDTH / 2), Vector2f(-BACK_TO_BASE, -CAR_WIDTH / 2), 0xff0000, local_viz_msg_);
-
-  // Draw safety margin in front of car
-  visualization::DrawLine(Vector2f(BASE_TO_FRONT + SAFETY_MARGIN, CAR_WIDTH / 2 + SAFETY_MARGIN), Vector2f(BASE_TO_FRONT + SAFETY_MARGIN, -(CAR_WIDTH / 2 + SAFETY_MARGIN)), 0xff0000, local_viz_msg_);
-
   // The control iteration goes here. 
   // Feel free to make helper functions to structure the control appropriately.
   
   // The latest observed point cloud is accessible via "point_cloud_"
 
-  // Compensate for latency
-  Odometry compensated_odometry = CompensateLatencyLoc();
-  vector<Vector2f> compensated_cloud = CompensatePointCloud(point_cloud_, compensated_odometry);
-
   // Eventually, you will have to set the control values to issue drive commands:
-  double curvature = 0;
-  double free_path_l = 0;
-  FindBestPath(curvature, free_path_l, compensated_odometry, compensated_cloud);
+  // drive_msg_.curvature = ...;
+  // drive_msg_.velocity = ...;
+  float current_speed = robot_vel_.norm();
+  // cout << current_speed << endl;
+  // distance_traveled_ += current_speed * robot_config_.dt;
+  // float dist_to_go = (10 - distance_traveled_); // hard code to make it go 10 forward
+  // float cmd_vel = run1DTimeOptimalControl(dist_to_go, current_speed, robot_config_);
 
-  drive_msg_.curvature = curvature;
-  drive_msg_.velocity = MoveForward(free_path_l);
+  vector<PathOption> path_options = samplePathOptions(31, point_cloud_, robot_config_);
+  int best_path = selectPath(path_options, nav_goal_loc_, robot_angle_, robot_loc_);
+
+  drive_msg_.curvature = path_options[best_path].curvature;
+  drive_msg_.velocity = run1DTimeOptimalControl(path_options[best_path].free_path_length, current_speed, robot_config_);
+	
+  // cout << drive_msg_.curvature << " " << drive_msg_.velocity << endl;
+
+  // visualization here
+  // visualization::DrawRectangle(Vector2f(robot_config_.length/2 - robot_config_.base_link_offset, 0),
+  //     robot_config_.length, robot_config_.width, 0, 0x00FF00, local_viz_msg_);
+  // Draw all path options in blue
+  for (unsigned int i = 0; i < path_options.size(); i++) {
+      visualization::DrawPathOption(path_options[i].curvature, path_options[i].free_path_length, 0, 0x0000FF, false, local_viz_msg_);
+  }
+  // Draw the best path in red
+  visualization::DrawPathOption(path_options[best_path].curvature, path_options[best_path].free_path_length, path_options[best_path].clearance, 0xFF0000, true, local_viz_msg_);
+// Find the closest point in the point cloud
+
+  // Plot the closest point in purple
+  visualization::DrawLine(path_options[best_path].closest_point, Vector2f(0, 1/path_options[best_path].curvature), 0xFF00FF, local_viz_msg_);
+  // for debugging
   
-  // add control given to Queue
-  Control control;
-  control.velocity = drive_msg_.velocity;
-  control.curvature = drive_msg_.curvature;
-  control.time = ros::Time::now().toSec();
-  past_controls_.push_back(control); 
+    
+  visualization::DrawPoint(Vector2f(0, 1/path_options[best_path].curvature), 0x0000FF, local_viz_msg_);
+
+// Determine if we already reached a waypoint
+  if (waypoints.size() > 0){
+    Eigen::Vector2f waypoint = waypoints[0];
+    float distance = (waypoint - robot_loc_).norm();
+    if (distance < 1){
+      waypoints.erase(waypoints.begin());
+      nav_goal_loc_ = waypoints[0];
+    }
+  }
+
+  // Draw waypoints from A*
+  // iterate over waypoints
+  vector<Eigen::Vector2f>::iterator iter;
+  Eigen::Vector2f previousWaypoint = Eigen::Vector2f(0, 0);
+  for (iter = waypoints.begin(); iter != waypoints.end(); iter++){
+    Eigen::Vector2f waypoint = *iter;
+    // swap out x, y
+    float x = waypoint.x();
+    float y = waypoint.y();
+    // convert from global frame to robot frame
+    float rotation = robot_angle_;
+    float translationX = robot_loc_.x();
+    float translationY = robot_loc_.y();
+    float newX = cos(rotation) * (x - translationX) + sin(rotation) * (y - translationY);
+    float newY = -sin(rotation) * (x - translationX) + cos(rotation) * (y - translationY);
+    Eigen::Vector2f robot_frame_waypoint = Eigen::Vector2f(newX, newY);
+    visualization::DrawCross(robot_frame_waypoint, 0.15, 0x000000, local_viz_msg_);
+    // draw line to waypoint
+    visualization::DrawLine(previousWaypoint, robot_frame_waypoint, 0x000000, local_viz_msg_);
+    previousWaypoint = robot_frame_waypoint;
+  }
+
 
   // Add timestamps to all messages.
   local_viz_msg_.header.stamp = ros::Time::now();
@@ -555,6 +489,13 @@ void Navigation::Run() {
   viz_pub_.publish(local_viz_msg_);
   viz_pub_.publish(global_viz_msg_);
   drive_pub_.publish(drive_msg_);
+  // Record control for latency compensation
+  Control control = GetCartesianControl(drive_msg_.velocity, drive_msg_.curvature, drive_msg_.header.stamp.toSec());
+  latency_compensation_->recordControl(control);
+
+  // Hack because ssh -X is slow
+  // if (latency_compensation_->getControlQueue().size() == 100) {
+  //  exit(0);
 }
 
-}  // namespace navigation
+} // namespace navigation

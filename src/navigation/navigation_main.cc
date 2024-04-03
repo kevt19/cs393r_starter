@@ -26,15 +26,12 @@
 #include <string.h>
 #include <inttypes.h>
 #include <vector>
-#include <iostream>
-
 
 #include "glog/logging.h"
 #include "gflags/gflags.h"
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
 #include "amrl_msgs/Localization2DMsg.h"
-#include "gflags/gflags.h"
 #include "geometry_msgs/Pose2D.h"
 #include "geometry_msgs/PoseArray.h"
 #include "geometry_msgs/PoseStamped.h"
@@ -51,11 +48,13 @@
 #include "std_msgs/String.h"
 
 #include "navigation.h"
+#include "latency_compensation.h"
 
 using amrl_msgs::Localization2DMsg;
 using math_util::DegToRad;
 using math_util::RadToDeg;
 using navigation::Navigation;
+using navigation::NavigationParams;
 using ros::Time;
 using ros_helpers::Eigen3DToRosPoint;
 using ros_helpers::Eigen2DToRosPoint;
@@ -73,10 +72,13 @@ DEFINE_string(init_topic,
               "initialpose",
               "Name of ROS topic for initialization");
 DEFINE_string(map, "GDC1", "Name of vector map file");
+DEFINE_string(robot_config, "config/navigation.lua", "Robot config file");
+
 
 bool run_ = true;
 sensor_msgs::LaserScan last_laser_msg_;
 Navigation* navigation_ = nullptr;
+NavigationParams* robot_config_ = nullptr; // use default values for now, but read from config later
 
 void LaserCallback(const sensor_msgs::LaserScan& msg) {
   if (FLAGS_v > 0) {
@@ -87,7 +89,7 @@ void LaserCallback(const sensor_msgs::LaserScan& msg) {
   // Location of the laser on the robot. Assumes the laser is forward-facing.
   const Vector2f kLaserLoc(0.2, 0);
 
-  vector<Vector2f> point_cloud;
+  static vector<Vector2f> point_cloud_;
   // TODO Convert the LaserScan to a point cloud
   // The LaserScan parameters are accessible as follows:
   // msg.angle_increment // Angular increment between subsequent rays
@@ -97,18 +99,18 @@ void LaserCallback(const sensor_msgs::LaserScan& msg) {
   // msg.range_min // Minimum observable range
   // msg.ranges[i] // The range of the i'th ray
 
-  int i = 0;
-  for (float theta = msg.angle_min; theta <= msg.angle_max; theta += msg.angle_increment)
-  {
-    float range = msg.ranges.at(i);
-    
-    point_cloud.push_back(Vector2f {kLaserLoc[0] + range*cos(theta), kLaserLoc[1] + range*sin(theta)});
-    
-    i++;
-
+  // save the pointcloud in the robot's frame
+  point_cloud_.clear();
+  for (size_t i = 0; i < msg.ranges.size(); i++) {
+    if (msg.ranges[i] > msg.range_min && msg.ranges[i] < msg.range_max) {
+      const float angle = msg.angle_min + i * msg.angle_increment;
+      const Vector2f point(kLaserLoc[0] + msg.ranges[i] * cos(angle), kLaserLoc[1] + msg.ranges[i] * sin(angle)); // Was not added before, need to verify
+      // const Vector2f point(msg.ranges[i] * sin(angle), -msg.ranges[i] * cos(angle));
+      point_cloud_.push_back(point);
+    }
   }
   
-  navigation_->ObservePointCloud(point_cloud, msg.header.stamp.toSec());
+  navigation_->ObservePointCloud(point_cloud_, msg.header.stamp.toSec());
   last_laser_msg_ = msg;
 }
 
@@ -158,12 +160,20 @@ int main(int argc, char** argv) {
   ros::init(argc, argv, "navigation", ros::init_options::NoSigintHandler);
   ros::NodeHandle n;
   navigation_ = new Navigation(FLAGS_map, &n);
+  robot_config_ = new NavigationParams();
+  navigation_->SetLatencyCompensation(new LatencyCompensation(robot_config_->actuation_latency, robot_config_->observation_latency, robot_config_->dt));
 
-  ros::Subscriber string_sub = n.subscribe("string_topic", 1, &StringCallback);
-  ros::Subscriber velocity_sub = n.subscribe(FLAGS_odom_topic, 1, &OdometryCallback);
-  ros::Subscriber localization_sub = n.subscribe(FLAGS_loc_topic, 1, &LocalizationCallback);
-  ros::Subscriber laser_sub = n.subscribe(FLAGS_laser_topic, 1, &LaserCallback);
-  ros::Subscriber goto_sub = n.subscribe("/move_base_simple/goal", 1, &GoToCallback);
+  ros::Subscriber string_sub = 
+      n.subscribe("string_topic", 1, &StringCallback);
+
+  ros::Subscriber velocity_sub =
+      n.subscribe(FLAGS_odom_topic, 1, &OdometryCallback);
+  ros::Subscriber localization_sub =
+      n.subscribe(FLAGS_loc_topic, 1, &LocalizationCallback);
+  ros::Subscriber laser_sub =
+      n.subscribe(FLAGS_laser_topic, 1, &LaserCallback);
+  ros::Subscriber goto_sub =
+      n.subscribe("/move_base_simple/goal", 1, &GoToCallback);
 
   RateLoop loop(20.0);
   while (run_ && ros::ok()) {
