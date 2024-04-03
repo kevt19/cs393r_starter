@@ -413,8 +413,8 @@ PathOption SelectOptimalPath(vector<PathOption> path_options, Vector2f short_ter
 }
 
 void Navigation::ObstacleAvoidance() {
-  // Vector2f short_term_goal(10,0);
-  Vector2f short_term_goal = nav_goal_loc_;
+  Vector2f short_term_goal(10,0);
+  // Vector2f short_term_goal = nav_goal_loc_;
   // Set up initial parameters
   drive_msg_.header.stamp = ros::Time::now();
   drive_msg_.curvature = 0;
@@ -552,8 +552,6 @@ void Navigation::OneDTOC(PathOption p, Vector2f stg){
   // float w1 = 0.5;
   // float w2 = 0.5;
   float dist_to_travel = p.free_path_length -0.2;
-  // float dist_to_travel = fplVal - 0.2;
-  // float dist_to_travel = fplVal * w1 + (stg - p.closest_point).norm();
   // float dist_to_travel = (stg - p.closest_point).norm();
   float curvature = p.curvature;
   float speed = robot_vel_.norm();
