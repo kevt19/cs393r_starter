@@ -450,11 +450,20 @@ void Navigation::Run() {
 
 // Determine if we already reached a waypoint
   if (waypoints.size() > 0){
-    Eigen::Vector2f waypoint = waypoints[0];
-    float distance = (waypoint - robot_loc_).norm();
-    if (distance < 1){
-      waypoints.erase(waypoints.begin());
-      nav_goal_loc_ = waypoints[0];
+    for (unsigned int i = 0; i < waypoints.size(); i++){
+      Eigen::Vector2f waypoint = waypoints[i];
+      float distance = (waypoint - robot_loc_).norm();
+      if (distance < 1){
+        // then we start from the next waypoint and erase the others
+        waypoints.erase(waypoints.begin(), waypoints.begin() + i + 1);
+        if (waypoints.size() > 0) {
+          nav_goal_loc_ = waypoints[0];
+        }
+        else {
+          nav_goal_loc_ = robot_loc_;
+        }
+        break;
+      }
     }
   }
 
