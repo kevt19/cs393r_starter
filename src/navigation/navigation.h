@@ -82,6 +82,16 @@ class Navigation {
   void FindBestPath(double& target_curvature, double& target_free_path_l, Odometry& odometry, const std::vector<Eigen::Vector2f>& cloud);
 
 
+  Eigen::Vector2f ClosestPointOnLine(const geometry::line2f line_seg, const Eigen::Vector2f point);
+
+  Eigen::Vector2f GetCarrot(std::vector<geometry::line2f> global_plan, const Eigen::Vector2f r_loc, float r_angle, size_t start_segment_idx, Eigen::Vector2f start_point);
+
+  bool ValidatePlan(const std::vector<geometry::line2f> global_plan, const Eigen::Vector2f r_loc, int* closest_seg_idx, Eigen::Vector2f* closest_point);
+
+
+
+
+
 
   std::vector<Eigen::Vector2f> CompensatePointCloud(const std::vector<Eigen::Vector2f>& cloud, const Odometry& odometry);
 

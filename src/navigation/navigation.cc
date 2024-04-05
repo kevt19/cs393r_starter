@@ -45,6 +45,7 @@ using amrl_msgs::AckermannCurvatureDriveMsg;
 using amrl_msgs::VisualizationMsg;
 using std::string;
 using std::vector;
+using geometry::line2f;
 
 using namespace math_util;
 using namespace ros_helpers;
@@ -500,6 +501,112 @@ void Navigation::FindBestPath(double& target_curvature, double& target_free_path
   target_free_path_l = best_path.fpl;
 
   // visualization::DrawPathOption(target_curvature, target_free_path_l, 0, 0xff0000, false, local_viz_msg_);
+}
+
+Eigen::Vector2f Navigation::ClosestPointOnLine(const line2f line_seg, const Eigen::Vector2f point){
+  Vector2f line_vec = line_seg.p1 - line_seg.p0;
+  Vector2f point_to_line_vec = point - line_seg.p0;
+  double projection = point_to_line_vec.dot(line_vec) / line_vec.dot(line_vec);
+  projection = std::max(0.0, std::min(1.0, projection));
+  Vector2f closest_point_on_line = line_seg.p0 + line_vec * projection; 
+  return closest_point_on_line;
+}
+
+// Takes in global plan, which is in map frame.
+// Takes in r_loc, which is the car's position in map frame
+// Takes in r_angle, which is the car's angle in map frame
+// Takes in start_segment_idx, which is the index for the line segment in global_plan that that the car should start from
+// Takes in start_point, which is the point on that above line segment that the car is closest to
+// Returns a local intermediate waypoint, which is in baselink frame
+Eigen::Vector2f Navigation::GetCarrot(vector<line2f> global_plan, const Eigen::Vector2f r_loc, float r_angle, size_t start_segment_idx, Vector2f start_point) {
+  float CIRCLE_RADIUS = 0.75;
+
+  // If no carrot is found (which shouldn't happen) just use the point on the global plan closest to the car
+  Vector2f carrot_map = start_point; 
+
+  // Iterate over each line in the global_plan starting with the first
+  for(size_t i = start_segment_idx; i < global_plan.size(); i++){
+    line2f plan_segment = global_plan[i];
+
+    // For the first segment, truncate it to start at the point closest to the car
+    if(i == start_segment_idx){
+      plan_segment.p0 = start_point;
+    }
+
+    // Find closest point on this line segment to the robot and the distance to it
+    Vector2f closest_point_on_line = ClosestPointOnLine(plan_segment, r_loc);
+    float dist_to_closest_point_on_line = (r_loc - closest_point_on_line).norm();
+
+    // This segment doesn't intersect with the circle
+    if(dist_to_closest_point_on_line > CIRCLE_RADIUS){
+      continue;
+    }
+
+    // Line segment is tangent to the circle
+    if(std::abs(dist_to_closest_point_on_line - CIRCLE_RADIUS) < kEpsilon){
+      carrot_map = closest_point_on_line;
+      break;
+    } 
+
+    float h = std::sqrt(CIRCLE_RADIUS*CIRCLE_RADIUS - dist_to_closest_point_on_line*dist_to_closest_point_on_line);
+    Vector2f line_vec = (plan_segment.p1 - plan_segment.p0).normalized();
+    Vector2f intersection_p_1 = closest_point_on_line + h * line_vec;
+    Vector2f intersection_p_2 = closest_point_on_line - h * line_vec;
+
+    if((intersection_p_1 - plan_segment.p0).dot(plan_segment.p1 - plan_segment.p0) > 0 && 
+       (intersection_p_1 - plan_segment.p1).dot(plan_segment.p0 - plan_segment.p1) > 0){
+      carrot_map = intersection_p_1;
+      break;
+    }
+
+    if((intersection_p_2 - plan_segment.p0).dot(plan_segment.p1 - plan_segment.p0) > 0 && 
+       (intersection_p_2 - plan_segment.p1).dot(plan_segment.p0 - plan_segment.p1) > 0){
+      carrot_map = intersection_p_2;
+      break;
+    }
+  }
+
+  // Now we have a carrot in map frame, need to convert to baselink frame
+  Eigen::Rotation2Df r_map_to_baselink(r_angle);
+  Eigen::Matrix2f R = r_map_to_baselink.toRotationMatrix();
+  Eigen::Matrix3f T_map_to_baselink;
+  T_map_to_baselink << R(0,0), R(0,1), r_loc.x(),
+                       R(1,0), R(1,1), r_loc.x(),
+                       0,      0,      1;
+
+  Eigen::Vector3f point_to_transform(carrot_map.x(), carrot_map.y(), 1.0f);
+  Eigen::Vector3f transformed_point = T_map_to_baselink.inverse() * point_to_transform;
+
+  Eigen::Vector2f carrot_baselink(transformed_point[0], transformed_point[1]);
+
+  return carrot_baselink;
+}
+
+// Takes in global plan, which is in map frame.
+// Takes in r_loc, which is the car's position in map frame
+// Fills in closest_seg_idx with the index in global_plan of the segment closest to the car
+// Fills in closest_point with the coords of the closest point to the car on the line segment closest to the car
+// Returns true if the car is close enough to any segment, false otherwise
+bool Navigation::ValidatePlan(const vector<line2f> global_plan, const Eigen::Vector2f r_loc, int* closest_seg_idx, Vector2f* closest_point){
+  float MIN_CLOSEST_DIST = 0.5;
+
+  for(int i = global_plan.size() - 1; i >= 0; i--){
+    line2f plan_segment = global_plan[i];
+
+    // Find closest point on this line segment to the robot and the distace to it
+    Vector2f closest_point_on_line = ClosestPointOnLine(plan_segment, r_loc);
+    float dist_to_closest_point_on_line = (r_loc - closest_point_on_line).norm();
+
+    // Check if the car is close enough to this segment
+    if(dist_to_closest_point_on_line < MIN_CLOSEST_DIST){
+      *closest_seg_idx = i;
+      (*closest_point)[0] = closest_point_on_line[0];
+      (*closest_point)[1] = closest_point_on_line[1];
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void Navigation::Run() {
