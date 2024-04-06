@@ -480,69 +480,50 @@ void Navigation::ObstacleDetector() {
     
       // Increment count for the cell
       obstacle_grid_counts[cell]++;
-      printf("finding if have not seen obstacle\n");
       if (unseen_obstacle_grid.find(cell) == unseen_obstacle_grid.end()){
         unseen_obstacle_grid.erase(cell);
       }
-      printf("already determined if have not seen obstacle\n");
-
-
-      // printf("Cell: (%d, %d)\n", cellX, cellY);
-      // printf("Count: %d\n", obstacle_grid_counts[cell]);
-  
-      printf("checking count\n");
-      int count = obstacle_grid_counts[cell];
-      if (count > 0) {
-        printf("found count\n");
-        printf("count %d\n", count);
-      }
-      printf("done checking count\n");
-
 
       // Check if the count exceeds the threshold
       if (obstacle_grid_counts[cell] > point_count_threshold) {
           // std::cout << "Cell (" << cellX << ", " << cellY << ") has more than " << point_count_threshold << " points." << std::endl;
-          printf("settting occupancy grid to true\n");
           obstacle_occupancy_grid[cell] = true; 
-          printf("checking if cell is in global plan\n");
           // check if same cell as anything in global plan
           if (global_plan_grid.find(cell) != global_plan_grid.end()){
-            printf("Obstacle detected in global plan, planning new one...\n");
             // find last waypoint and use it as goal
             int n_waypoints = waypoints.size();
             if (n_waypoints > 0){
               nav_goal_loc_ = waypoints[n_waypoints - 1];
               SetNavGoal(nav_goal_loc_, robot_angle_);
             }
-          printf("determined if in global plan\n");
         }
     }
-        printf("bullshit loop");
+
+      std::vector<std::pair<int, int>> cells_to_erase;
 
       for (const auto& cell: unseen_obstacle_grid) { 
-        printf("che");
-        obstacle_grid_counts[cell.first]--;
-        if (obstacle_grid_counts[cell.first] <= point_count_threshold) {
-          unseen_obstacle_grid.erase(cell.first);
+        const auto& key = cell.first; // Extracting the key
+        obstacle_grid_counts[key]--;
+        if (obstacle_grid_counts[key] <= point_count_threshold) {
+          cells_to_erase.push_back(key);
         }
-        printf("checking if obstacle grid count 0");
-        if (obstacle_grid_counts[cell.first] == 0)
+        if (obstacle_grid_counts[key] == 0)
         {
-          printf("erasing obstacle grid count 0");
-          obstacle_grid_counts.erase(cell.first);
-        }
-        printf("done checking if obstacle grid count 0");
-  }
+          obstacle_grid_counts.erase(key);
 
-  printf("done w/ function");
+        }
+      }
+
+      for (const auto& cell: cells_to_erase) {
+        unseen_obstacle_grid.erase(cell);
+      }
 
     // for (const auto& cell: obstacle_occupancy_grid) {
     //       visualization::DrawCross(Vector2f(cell.first.first / discrete_multiplier, 
     //                                         cell.first.second / discrete_multiplier), 0.05, 0x000000, global_viz_msg_);
     //       // printf("Cell: (%d, %d)\n", cell.first.first, cell.first.second);
     // }
-}
-printf("done w/ function");
+  }
 }
 
 void Navigation::UpdateLocation(const Eigen::Vector2f& loc, float angle) {
