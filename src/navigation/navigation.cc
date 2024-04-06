@@ -609,6 +609,148 @@ void Navigation::OneDTOC(PathOption p, Vector2f stg){
   viz_pub_.publish(local_viz_msg_);
 }
 
+Eigen::Vector2f Navigation::ClosestPointOnLine(const geometry::line2f line_seg, const Eigen::Vector2f point){
+  Vector2f line_vec = line_seg.p1 - line_seg.p0;
+  Vector2f point_to_line_vec = point - line_seg.p0;
+  double projection = point_to_line_vec.dot(line_vec) / line_vec.dot(line_vec);
+  projection = std::max(0.0, std::min(1.0, projection));
+  Vector2f closest_point_on_line = line_seg.p0 + line_vec * projection; 
+  return closest_point_on_line;
+}
+
+// Takes in global plan, which is in map frame.
+// Takes in r_loc, which is the car's position in map frame
+// Fills in closest_seg_idx with the index in global_plan of the segment closest to the car
+// Fills in closest_point with the coords of the closest point to the car on the line segment closest to the car
+// Returns true if the car is close enough to any segment, false otherwise
+bool Navigation::ValidatePlan(const std::vector<Vector2f> global_plan, const Eigen::Vector2f r_loc, int* closest_waypoint_idx){
+  float MIN_CLOSEST_DIST = 0.5;
+  visualization::DrawArc(Vector2f(0,0), MIN_CLOSEST_DIST, 0, 2 * 3.14, 0x00FF00, local_viz_msg_);
+
+  for(int i = global_plan.size() - 1; i >= 0; i--){
+    float dist_to_waypoint = (global_plan[i] - r_loc).norm();
+    geometry::line2f plan_segment(global_plan[i], global_plan[i-1]);
+
+    // Check if the car is close enough to this segment
+    if(dist_to_waypoint < MIN_CLOSEST_DIST){
+      *closest_waypoint_idx = i;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+
+// Takes in global plan, which is in map frame.
+// Takes in r_loc, which is the car's position in map frame
+// Takes in r_angle, which is the car's angle in map frame
+// Takes in start_waypoint_idx, which is the index for the waypoint in global_plan that that the car should start from
+// Returns a local intermediate waypoint, which is in map frame
+Eigen::Vector2f Navigation::GetCarrot(vector<Vector2f> global_plan, const Eigen::Vector2f r_loc, float r_angle, size_t start_waypoint_idx) {
+  float CIRCLE_RADIUS = 1.5;
+  visualization::DrawArc(Vector2f(0,0), CIRCLE_RADIUS, 0, 2 * 3.14, 0x0000FF, local_viz_msg_);
+
+
+  // If no carrot is found just use the final waypoint
+  Vector2f carrot_map = global_plan[global_plan.size() - 1]; 
+
+  // Iterate over each line in the global_plan starting with the first
+  for(size_t i = start_waypoint_idx; i < global_plan.size(); i++){
+    // if((global_plan[i] - r_loc).norm() > CIRCLE_RADIUS){
+    //   carrot_map = global_plan[i - 1];
+    //   break;
+    // }
+
+    if((global_plan[i] - r_loc).norm() < CIRCLE_RADIUS){
+      continue;
+    }
+
+    Vector2f p_a = global_plan[i];
+    Vector2f p_b = global_plan[i-1];
+
+    float p = r_loc.x();
+    float q = r_loc.y();
+    float r = CIRCLE_RADIUS;
+
+    float x_1, x_2, y_1, y_2;
+
+    if((p_a.x() - p_b.x()) < kEpsilon){
+      float k = p_a.x();
+      
+      float B = -2 * q;
+      float C = pow(p, 2) + pow(q, 2) - pow(r, 2) - (2*k*p) + pow(k, 2);
+
+      y_1 = (-B + sqrt(pow(B,2) - 4*C)) / 2;
+      y_2 = (-B - sqrt(pow(B,2) - 4*C)) / 2;
+
+      x_1 = k;
+      x_2 = k;
+    }
+    else{
+      float m = (p_a.y() - p_b.y()) / (p_a.x() / p_b.x());
+      float c = p_a.y() - (m * p_a.x());
+
+      float A = pow(m, 2) + 1;
+      float B = 2 * (m*c - m*q - p);
+      float C = pow(q,2) - pow(r,2) + pow(p,2) - (2*c*q) + pow(c,2);
+
+      if((pow(B,2) - 4*A*C) <= 0){
+        break;
+      }
+
+      x_1 = (-B + sqrt(pow(B,2) - 4*A*C)) / (2*A);
+      x_2 = (-B - sqrt(pow(B,2) - 4*A*C)) / (2*A);
+
+      y_1 = m * x_1 + c;
+      y_2 = m * x_2 + c;
+    }
+
+    Vector2f possible_1 = Vector2f(x_1, y_1);
+    Vector2f possible_2 = Vector2f(x_2, y_2);
+
+    if((possible_1 - p_a).norm() < (possible_2 - p_a).norm()){
+      carrot_map = possible_1;
+    }
+    else{
+      carrot_map = possible_2;
+    }
+    
+    visualization::DrawCross(carrot_map, 0.12, 0xFF0000, global_viz_msg_);
+    visualization::DrawCross(Vector2f(x_1, y_1), 0.1, 0x00FFFF, global_viz_msg_);
+    visualization::DrawCross(Vector2f(x_2, y_2), 0.1, 0x00FFFF, global_viz_msg_);
+
+    visualization::DrawCross(p_a, 0.05, 0x00FFFF, global_viz_msg_);
+    visualization::DrawCross(p_b, 0.05, 0x00FFFF, global_viz_msg_);
+
+    break;
+  }
+
+  // If the above math blows up for some unforseen reason, this allows the robot to keep going instead of halting
+  if(std::isnan(carrot_map.x()) || std::isnan(carrot_map.y())){
+    carrot_map =  global_plan[start_waypoint_idx + 1];
+  }
+
+  return carrot_map;
+  
+
+  // Now we have a carrot in map frame, need to convert to baselink frame
+  cout << "Carrot Map: " << carrot_map << endl;
+  Eigen::Rotation2Df r_map_to_baselink(r_angle);
+  Eigen::Matrix2f R = r_map_to_baselink.toRotationMatrix();
+  Eigen::Matrix3f T_map_to_baselink;
+  T_map_to_baselink << R(0,0), R(0,1), r_loc.x(),
+                       R(1,0), R(1,1), r_loc.y(),
+                       0,      0,      1;
+
+  Eigen::Vector3f point_to_transform(carrot_map.x(), carrot_map.y(), 1.0f);
+  Eigen::Vector3f transformed_point = T_map_to_baselink.inverse() * point_to_transform;
+
+  Eigen::Vector2f carrot_baselink(transformed_point[0], transformed_point[1]);
+
+  return carrot_baselink;
+}
+
 void Navigation::Run() {
   // This function gets called 20 times a second to form the control loop.
   
@@ -632,12 +774,17 @@ void Navigation::Run() {
 
   // Determine if we already reached a waypoint
   if (waypoints.size() > 0){
-    Eigen::Vector2f waypoint = waypoints[0];
-    float distance = (waypoint - robot_loc_).norm();
-    if (distance < 1){
-      waypoints.erase(waypoints.begin());
-      nav_goal_loc_ = waypoints[0];
-    }
+    int closest_waypoint_idx = 0;
+    bool is_plan_valid = ValidatePlan(waypoints, robot_loc_, &closest_waypoint_idx);
+    cout << "Is plan valid: " << is_plan_valid << endl;
+    visualization::DrawCross(waypoints[closest_waypoint_idx], 0.06, 0x00FF00, global_viz_msg_);
+
+    waypoints.erase(waypoints.begin(), waypoints.begin() + closest_waypoint_idx);
+    
+    Vector2f carrot = GetCarrot(waypoints, robot_loc_, robot_angle_, closest_waypoint_idx);
+    //visualization::DrawCross(carrot, 0.07, 0x0000FF, global_viz_msg_);
+    cout << carrot << endl;
+    nav_goal_loc_ = carrot;
   }
   else{
     nav_goal_loc_ = robot_loc_;
@@ -673,6 +820,8 @@ void Navigation::Run() {
   //Eigen::Vector2f goal = Eigen::Vector2f(10, 10);
   //visualization::DrawLine(origin, goal, 0x00FF00, local_viz_msg_);
   viz_pub_.publish(local_viz_msg_);
+  viz_pub_.publish(global_viz_msg_);
+
 
   // Eventually, you will have to set the control values to issue drive commands:
   // drive_msg_.curvature = ...;
