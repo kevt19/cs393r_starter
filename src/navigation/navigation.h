@@ -96,6 +96,8 @@ class Navigation {
   // Used to set the next target pose.
   void SetNavGoal(const Eigen::Vector2f& loc, float angle);
 
+  void ObstacleDetector();
+
   // // Set the latency compensation object.
   void SetLatencyCompensation(LatencyCompensation* latency_compensation);
 
@@ -127,6 +129,12 @@ class Navigation {
   std::vector<Eigen::Vector2f> point_cloud_;
   // distance traveled
   float distance_traveled_ = 0.0f;
+  // Point cloud w.r.t world frame
+  std::vector<Eigen::Vector2f> point_cloud_wf;
+  // Initialize variables to store cell values and resolution
+  std::map<std::pair<int, int>, int> obstacle_map;
+  // Create a map of obstacle bins
+  std::map<std::pair<int,int>,bool> detected_obstacles; 
 
   // Whether navigation is complete.
   bool nav_complete_;

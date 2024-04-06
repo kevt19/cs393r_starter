@@ -37,6 +37,7 @@
 #include "path_options.h"
 #include "latency_compensation.h"
 
+
 using Eigen::Vector2f;
 using amrl_msgs::AckermannCurvatureDriveMsg;
 using amrl_msgs::VisualizationMsg;
@@ -47,6 +48,8 @@ using std::min;
 
 using namespace math_util;
 using namespace ros_helpers;
+
+DEFINE_double(resolution, 0.5, "Global Planner Cell resolution");
 
 namespace {
 ros::Publisher drive_pub_;
@@ -95,8 +98,7 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
     nav_goal_angle_ = angle; // ignore angle for now
     waypoints.clear();
     // discretize the map
-    float resolution = 0.5;
-    float discrete_multiplier = 1.0 / resolution; // makes it discrete
+    float discrete_multiplier = 1.0 / FLAGS_resolution; // makes it discrete
 
     // convert robot_loc and nav_goal_loc to discrete
     int robot_x_discrete = robot_loc_.x() * discrete_multiplier;
@@ -201,7 +203,7 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
 
         // check if we already reached the goal
         // Eigen::Vector2f wp = Eigen::Vector2f(x, y);
-        if ((currentLocation - goal).norm() < resolution){
+        if ((currentLocation - goal).norm() < FLAGS_resolution){
           printf("Current location x: %f, y: %f\n", x, y);
           printf("Reached goal\n");
 
@@ -249,13 +251,13 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
             if (i == 0 && j == 0){
               continue;
             }
-            if (x + i*resolution < map_min_x || x + i*resolution > map_max_x || y + j*resolution < map_min_y || y + j*resolution > map_max_y){
+            if (x + i*FLAGS_resolution < map_min_x || x + i*FLAGS_resolution > map_max_x || y + j*FLAGS_resolution < map_min_y || y + j*FLAGS_resolution > map_max_y){
               continue;
             }
-            neighbors.push_back(Eigen::Vector2f(x + i*resolution, y + j*resolution));
+            neighbors.push_back(Eigen::Vector2f(x + i*FLAGS_resolution, y + j*FLAGS_resolution));
           }
         } 
-        float max_range = 3.0 * resolution / 2;
+        float max_range = 3.0 * FLAGS_resolution / 2;
 
         const float x_min = x - max_range;
         const float y_min = y - max_range;
@@ -313,7 +315,7 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
 
           // let's use actual distance for distance calculation
           float distanceToNode = (selectedWaypoint - currentLocation).norm(); 
-          // float distanceToNode = resolution;
+          // float distanceToNode = FLAGS_resolution;
           float h = (selectedWaypoint - goal).norm();
           float g = actualDistanceSoFar + distanceToNode;
 
@@ -348,6 +350,48 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
         break;
       }
     }
+}
+
+void Navigation::ObstacleDetector() {
+  // Create a pointcloud that is w.r.t the map frame
+  for (const auto& point: point_cloud_) {
+    Eigen::Rotation2Df r_map_to_baselink(robot_angle_);
+    Eigen::Matrix2f R = r_map_to_baselink.toRotationMatrix();
+    Eigen::Matrix3f T_map_to_baselink;
+    T_map_to_baselink << R(0,0), R(0,1), robot_loc_.x(),
+                        R(1,0), R(1,1), robot_loc_.y(),
+                        0,      0,      1;
+
+    Eigen::Vector3f point_to_transform(point.x(), point.y(), 1.0f);
+    Eigen::Vector3f transformed_point = T_map_to_baselink * point_to_transform;
+    Eigen::Vector2f point_wf(transformed_point[0], transformed_point[1]);
+    point_cloud_wf.push_back(point_wf);
+  }
+
+    // // Create an obstacle based on how many points fall within the cell
+      int point_count_threshold = 10;
+      float discrete_multiplier = 1.0 / FLAGS_resolution; // makes it discrete
+
+      for (Vector2f point: point_cloud_wf) {
+        int cellX = std::round(point.x() * discrete_multiplier);
+        int cellY = std::round(point.y() * discrete_multiplier);
+        std::pair<int, int> cell = std::make_pair(cellX, cellY);
+      
+        // Increment count for the cell
+        obstacle_map[cell]++;
+
+        // Check if the count exceeds the threshold
+        if (obstacle_map[cell] > point_count_threshold) {
+            // std::cout << "Cell (" << cellX << ", " << cellY << ") has more than " << point_count_threshold << " points." << std::endl;
+            detected_obstacles[cell] = true; 
+        }
+    }
+
+    for (const auto& cell: detected_obstacles) {
+            visualization::DrawCross(Vector2f(cell.first.first/2, cell.first.second/2), 0.05, 0x000000, global_viz_msg_);
+            printf("Cell: (%d, %d)\n", cell.first.first, cell.first.second);
+          }
+
 }
 
 void Navigation::UpdateLocation(const Eigen::Vector2f& loc, float angle) {
@@ -488,6 +532,8 @@ void Navigation::Run() {
     visualization::DrawLine(previousWaypoint, robot_frame_waypoint, 0x000000, local_viz_msg_);
     previousWaypoint = robot_frame_waypoint;
   }
+
+  ObstacleDetector();
 
 
   // Add timestamps to all messages.
