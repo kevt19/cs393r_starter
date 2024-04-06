@@ -95,7 +95,10 @@ class Navigation {
   void Run();
   // Used to set the next target pose.
   void SetNavGoal(const Eigen::Vector2f& loc, float angle);
-
+  void PopulateWallOccupancyGrid();
+  std::vector<Eigen::Vector2f> GetNeighborhoodOfWallPoints(const Eigen::Vector2f p0, 
+                                                           const Eigen::Vector2f p1,
+                                                           float margin);
   void ObstacleDetector();
 
   // // Set the latency compensation object.
@@ -132,9 +135,12 @@ class Navigation {
   // Point cloud w.r.t world frame
   std::vector<Eigen::Vector2f> point_cloud_wf;
   // Initialize variables to store cell values and resolution
-  std::map<std::pair<int, int>, int> obstacle_map;
+  std::map<std::pair<int, int>, int> obstacle_grid_counts;
   // Create a map of obstacle bins
-  std::map<std::pair<int,int>,bool> detected_obstacles; 
+  std::map<std::pair<int,int>,bool> obstacle_occupancy_grid; 
+
+  std::vector<std::map<std::pair<int, int>, bool>> wall_occupancy_grids;
+  std::map<std::pair<int, int>, bool> global_plan_grid;
 
   // Whether navigation is complete.
   bool nav_complete_;

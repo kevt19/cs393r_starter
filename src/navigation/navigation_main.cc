@@ -161,6 +161,7 @@ int main(int argc, char** argv) {
   ros::NodeHandle n;
   navigation_ = new Navigation(FLAGS_map, &n);
   robot_config_ = new NavigationParams();
+  navigation_->PopulateWallOccupancyGrid();
   navigation_->SetLatencyCompensation(new LatencyCompensation(robot_config_->actuation_latency, robot_config_->observation_latency, robot_config_->dt));
 
   ros::Subscriber string_sub = 
