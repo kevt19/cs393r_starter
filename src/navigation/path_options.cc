@@ -143,7 +143,8 @@ void setPathOption(navigation::PathOption& path_option,
 
 vector<navigation::PathOption> samplePathOptions(int num_options,
                                                     const vector<Eigen::Vector2f>& point_cloud,
-                                                    const navigation::NavigationParams& robot_config) {
+                                                    const navigation::NavigationParams& robot_config,
+                                                    Eigen::Vector2f goal_loc) {
     static vector<navigation::PathOption> path_options;
     path_options.clear();
     float max_curvature = robot_config.max_curvature;
@@ -157,6 +158,19 @@ vector<navigation::PathOption> samplePathOptions(int num_options,
         
         navigation::PathOption path_option;
         setPathOption(path_option, curvature, point_cloud, robot_config);
+
+        float turning_radius = 1/curvature;
+        float fpl_lim_curve = fabs(turning_radius)*atan2(goal_loc.norm(), fabs(turning_radius));
+        float kEpsilon = 1e-5;
+        if(curvature < kEpsilon && curvature > -kEpsilon && path_option.free_path_length > goal_loc.norm()){
+            // Straight path
+            path_option.free_path_length = goal_loc.norm();
+        } else if (path_option.free_path_length > fpl_lim_curve) {
+            // Using the optimization mentioned in class where we take the free path 
+            // only till the tangent.
+            path_option.free_path_length = fpl_lim_curve;
+        }
+
         path_options.push_back(path_option);
     }
     // exit(0);
@@ -186,18 +200,18 @@ int selectPath(const vector<navigation::PathOption>& path_options, Eigen::Vector
     int selected_path = 0;
     float best_score = 0;
 
-    Eigen::Vector2f goal_loc_in_robot_frame;
-    float x = goal_loc.x();
-    float y = goal_loc.y();
-    // convert from global frame to robot frame
-    float translationX = robot_loc_.x();
-    float translationY = robot_loc_.y();
-    float newX = cos(robot_angle) * (x - translationX) + sin(robot_angle) * (y - translationY);
-    float newY = -sin(robot_angle) * (x - translationX) + cos(robot_angle) * (y - translationY);
-    goal_loc_in_robot_frame = Eigen::Vector2f(newX, newY);
+    // Eigen::Vector2f goal_loc_in_robot_frame;
+    // float x = goal_loc.x();
+    // float y = goal_loc.y();
+    // // convert from global frame to robot frame
+    // float translationX = robot_loc_.x();
+    // float translationY = robot_loc_.y();
+    // float newX = cos(robot_angle) * (x - translationX) + sin(robot_angle) * (y - translationY);
+    // float newY = -sin(robot_angle) * (x - translationX) + cos(robot_angle) * (y - translationY);
+    // goal_loc_in_robot_frame = Eigen::Vector2f(newX, newY);
 
     for (unsigned int i = 0; i < path_options.size(); i++) {
-        float s = score(path_options[i].free_path_length, path_options[i].curvature, path_options[i].clearance, goal_loc_in_robot_frame);
+        float s = score(path_options[i].free_path_length, path_options[i].curvature, path_options[i].clearance, goal_loc);
         if (s > best_score) {
             best_score = s;
             selected_path = i;

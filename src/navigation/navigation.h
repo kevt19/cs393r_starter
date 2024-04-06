@@ -103,6 +103,14 @@ class Navigation {
 
   Control GetCartesianControl(float velocity, float curvature, double time);
 
+  Eigen::Vector2f ClosestPointOnLine(const geometry::line2f line_seg, const Eigen::Vector2f point);
+
+  bool ValidatePlan(const std::vector<Eigen::Vector2f> global_plan, const Eigen::Vector2f r_loc, int* closest_waypoint_idx);
+
+  Eigen::Vector2f GetCarrot(std::vector<Eigen::Vector2f> global_plan, const Eigen::Vector2f r_loc, float r_angle, size_t start_waypoint_idx);
+
+
+
  private:
   std::vector<Eigen::Vector2f> waypoints;
   // Whether odometry has been initialized.

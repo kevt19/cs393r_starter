@@ -369,7 +369,7 @@ void Navigation::ObstacleDetector() {
   }
 
     // // Create an obstacle based on how many points fall within the cell
-      int point_count_threshold = 10;
+      int point_count_threshold = 50;
       float discrete_multiplier = 1.0 / FLAGS_resolution; // makes it discrete
 
       for (Vector2f point: point_cloud_wf) {
@@ -388,8 +388,8 @@ void Navigation::ObstacleDetector() {
     }
 
     for (const auto& cell: detected_obstacles) {
-            visualization::DrawCross(Vector2f(cell.first.first/2, cell.first.second/2), 0.05, 0x000000, global_viz_msg_);
-            printf("Cell: (%d, %d)\n", cell.first.first, cell.first.second);
+            visualization::DrawCross(Vector2f(cell.first.first/discrete_multiplier, cell.first.second/discrete_multiplier), 0.05, 0x000000, global_viz_msg_);
+            //printf("Cell: (%d, %d)\n", cell.first.first, cell.first.second);
           }
 
 }
@@ -442,6 +442,80 @@ Control Navigation::GetCartesianControl(float velocity, float curvature, double 
   return {x_dot, y_dot, theta_dot, time};
 }
 
+Eigen::Vector2f Navigation::ClosestPointOnLine(const geometry::line2f line_seg, const Eigen::Vector2f point){
+  Vector2f line_vec = line_seg.p1 - line_seg.p0;
+  Vector2f point_to_line_vec = point - line_seg.p0;
+  double projection = point_to_line_vec.dot(line_vec) / line_vec.dot(line_vec);
+  projection = std::max(0.0, std::min(1.0, projection));
+  Vector2f closest_point_on_line = line_seg.p0 + line_vec * projection; 
+  return closest_point_on_line;
+}
+
+// Takes in global plan, which is in map frame.
+// Takes in r_loc, which is the car's position in map frame
+// Fills in closest_seg_idx with the index in global_plan of the segment closest to the car
+// Fills in closest_point with the coords of the closest point to the car on the line segment closest to the car
+// Returns true if the car is close enough to any segment, false otherwise
+bool Navigation::ValidatePlan(const std::vector<Vector2f> global_plan, const Eigen::Vector2f r_loc, int* closest_waypoint_idx){
+  float MIN_CLOSEST_DIST = 0.5;
+  visualization::DrawArc(Vector2f(0,0), MIN_CLOSEST_DIST, 0, 2 * 3.14, 0x00FF00, local_viz_msg_);
+
+  for(int i = global_plan.size() - 1; i >= 0; i--){
+    float dist_to_waypoint = (global_plan[i] - r_loc).norm();
+    geometry::line2f plan_segment(global_plan[i], global_plan[i-1]);
+
+    // Check if the car is close enough to this segment
+    if(dist_to_waypoint < MIN_CLOSEST_DIST){
+      *closest_waypoint_idx = i;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+
+// Takes in global plan, which is in map frame.
+// Takes in r_loc, which is the car's position in map frame
+// Takes in r_angle, which is the car's angle in map frame
+// Takes in start_segment_idx, which is the index for the line segment in global_plan that that the car should start from
+// Takes in start_point, which is the point on that above line segment that the car is closest to
+// Returns a local intermediate waypoint, which is in baselink frame
+Eigen::Vector2f Navigation::GetCarrot(vector<Vector2f> global_plan, const Eigen::Vector2f r_loc, float r_angle, size_t start_waypoint_idx) {
+  float CIRCLE_RADIUS = 1;
+  visualization::DrawArc(Vector2f(0,0), CIRCLE_RADIUS, 0, 2 * 3.14, 0x0000FF, local_viz_msg_);
+
+
+  // If no carrot is found just use the final waypoint
+  Vector2f carrot_map = global_plan[global_plan.size() - 1]; 
+
+  // Iterate over each line in the global_plan starting with the first
+  for(size_t i = start_waypoint_idx; i < global_plan.size(); i++){
+    if((global_plan[i] - r_loc).norm() > CIRCLE_RADIUS){
+      carrot_map = global_plan[i - 1];
+      break;
+    }
+  }
+  
+
+  // Now we have a carrot in map frame, need to convert to baselink frame
+  cout << "Carrot Map: " << carrot_map << endl;
+  Eigen::Rotation2Df r_map_to_baselink(r_angle);
+  Eigen::Matrix2f R = r_map_to_baselink.toRotationMatrix();
+  Eigen::Matrix3f T_map_to_baselink;
+  T_map_to_baselink << R(0,0), R(0,1), r_loc.x(),
+                       R(1,0), R(1,1), r_loc.y(),
+                       0,      0,      1;
+
+  Eigen::Vector3f point_to_transform(carrot_map.x(), carrot_map.y(), 1.0f);
+  Eigen::Vector3f transformed_point = T_map_to_baselink.inverse() * point_to_transform;
+
+  Eigen::Vector2f carrot_baselink(transformed_point[0], transformed_point[1]);
+
+  return carrot_baselink;
+}
+
+
 void Navigation::Run() {
   // This function gets called 20 times a second to form the control loop.
 
@@ -466,11 +540,14 @@ void Navigation::Run() {
   // float dist_to_go = (10 - distance_traveled_); // hard code to make it go 10 forward
   // float cmd_vel = run1DTimeOptimalControl(dist_to_go, current_speed, robot_config_);
 
-  vector<PathOption> path_options = samplePathOptions(31, point_cloud_, robot_config_);
+  vector<PathOption> path_options = samplePathOptions(31, point_cloud_, robot_config_, nav_goal_loc_);
   int best_path = selectPath(path_options, nav_goal_loc_, robot_angle_, robot_loc_);
 
   drive_msg_.curvature = path_options[best_path].curvature;
   drive_msg_.velocity = run1DTimeOptimalControl(path_options[best_path].free_path_length, current_speed, robot_config_);
+  //drive_msg_.velocity = 0;
+
+
 	
   // cout << drive_msg_.curvature << " " << drive_msg_.velocity << endl;
 
@@ -479,36 +556,55 @@ void Navigation::Run() {
   //     robot_config_.length, robot_config_.width, 0, 0x00FF00, local_viz_msg_);
   // Draw all path options in blue
   for (unsigned int i = 0; i < path_options.size(); i++) {
-      visualization::DrawPathOption(path_options[i].curvature, path_options[i].free_path_length, 0, 0x0000FF, false, local_viz_msg_);
+      //visualization::DrawPathOption(path_options[i].curvature, path_options[i].free_path_length, 0, 0x0000FF, false, local_viz_msg_);
   }
   // Draw the best path in red
-  visualization::DrawPathOption(path_options[best_path].curvature, path_options[best_path].free_path_length, path_options[best_path].clearance, 0xFF0000, true, local_viz_msg_);
+  //visualization::DrawPathOption(path_options[best_path].curvature, path_options[best_path].free_path_length, path_options[best_path].clearance, 0xFF0000, true, local_viz_msg_);
 // Find the closest point in the point cloud
 
   // Plot the closest point in purple
-  visualization::DrawLine(path_options[best_path].closest_point, Vector2f(0, 1/path_options[best_path].curvature), 0xFF00FF, local_viz_msg_);
+  //visualization::DrawLine(path_options[best_path].closest_point, Vector2f(0, 1/path_options[best_path].curvature), 0xFF00FF, local_viz_msg_);
   // for debugging
   
     
-  visualization::DrawPoint(Vector2f(0, 1/path_options[best_path].curvature), 0x0000FF, local_viz_msg_);
+  //visualization::DrawPoint(Vector2f(0, 1/path_options[best_path].curvature), 0x0000FF, local_viz_msg_);
+
+  
 
 // Determine if we already reached a waypoint
   if (waypoints.size() > 0){
-    for (unsigned int i = 0; i < waypoints.size(); i++){
-      Eigen::Vector2f waypoint = waypoints[i];
-      float distance = (waypoint - robot_loc_).norm();
-      if (distance < 1){
-        // then we start from the next waypoint and erase the others
-        waypoints.erase(waypoints.begin(), waypoints.begin() + i + 1);
-        if (waypoints.size() > 0) {
-          nav_goal_loc_ = waypoints[0];
-        }
-        else {
-          nav_goal_loc_ = robot_loc_;
-        }
-        break;
-      }
-    }
+    int closest_waypoint_idx = 0;
+    bool is_plan_valid = ValidatePlan(waypoints, robot_loc_, &closest_waypoint_idx);
+    cout << "Is plan valid: " << is_plan_valid << endl;
+    visualization::DrawCross(waypoints[closest_waypoint_idx], 0.06, 0x00FF00, global_viz_msg_);
+
+    waypoints.erase(waypoints.begin(), waypoints.begin() + closest_waypoint_idx);
+    
+    Vector2f carrot_bl = GetCarrot(waypoints, robot_loc_, robot_angle_, closest_waypoint_idx);
+    visualization::DrawCross(carrot_bl, 0.07, 0x0000FF, local_viz_msg_);
+    cout << carrot_bl << endl;
+    nav_goal_loc_ = carrot_bl;
+
+
+
+    // for (unsigned int i = 0; i < waypoints.size(); i++){
+    //   Eigen::Vector2f waypoint = waypoints[i];
+    //   float distance = (waypoint - robot_loc_).norm();
+    //   if (distance < 1){
+    //     // then we start from the next waypoint and erase the others
+    //     waypoints.erase(waypoints.begin(), waypoints.begin() + i + 1);
+    //     if (waypoints.size() > 0) {
+    //       nav_goal_loc_ = waypoints[0];
+    //     }
+    //     else {
+    //       nav_goal_loc_ = robot_loc_;
+    //     }
+    //     break;
+    //   }
+    // }
+  }
+  else{
+    nav_goal_loc_ = Vector2f(0,0);
   }
 
   // Draw waypoints from A*
@@ -527,7 +623,7 @@ void Navigation::Run() {
     float newX = cos(rotation) * (x - translationX) + sin(rotation) * (y - translationY);
     float newY = -sin(rotation) * (x - translationX) + cos(rotation) * (y - translationY);
     Eigen::Vector2f robot_frame_waypoint = Eigen::Vector2f(newX, newY);
-    visualization::DrawCross(robot_frame_waypoint, 0.15, 0x000000, local_viz_msg_);
+    visualization::DrawCross(robot_frame_waypoint, 0.04, 0x000000, local_viz_msg_);
     // draw line to waypoint
     visualization::DrawLine(previousWaypoint, robot_frame_waypoint, 0x000000, local_viz_msg_);
     previousWaypoint = robot_frame_waypoint;
