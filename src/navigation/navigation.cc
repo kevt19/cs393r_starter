@@ -460,6 +460,19 @@ void Navigation::ObstacleAvoidance() {
       p.free_path_length = fabs(turning_radius)*atan2(MAX_SHORT_TERM_GOAL_, fabs(turning_radius));
     }
     p = GetFreePathLength(p, short_term_goal);
+
+    // Limit the free path length to the closest point of approach to the nav goal
+    float turning_radius = 1/p.curvature;
+    float fpl_lim_curve = fabs(turning_radius)*atan2(short_term_goal.norm(), fabs(turning_radius));
+    if(c < kEpsilon && c > -kEpsilon && p.free_path_length > short_term_goal.norm()){
+      // Straight path
+      p.free_path_length = short_term_goal.norm();
+    } else if (p.free_path_length > fpl_lim_curve) {
+      // Using the optimization mentioned in class where we take the free path 
+      // only till the tangent.
+      p.free_path_length = fpl_lim_curve;
+    }
+
     visualization::DrawPathOption(p.curvature,
                                   p.free_path_length,
                                   p.clearance,
@@ -625,6 +638,9 @@ void Navigation::Run() {
       waypoints.erase(waypoints.begin());
       nav_goal_loc_ = waypoints[0];
     }
+  }
+  else{
+    nav_goal_loc_ = robot_loc_;
   }
 
   // Draw waypoints from A*
