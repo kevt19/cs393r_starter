@@ -78,21 +78,21 @@ using math_util::AngleDiff;
 */
 
 // . efficiency~accuracy tradeoff parameters
-#define n_particles 35 // number of particles instantiated and resampled by filter
+#define n_particles 20 // number of particles instantiated and resampled by filter
 #define laser_downsampling_factor 10 // downsampled laser scan will be 1/N its original size; used to improve computational efficiency
 #define resampling_iteration_threshold 15// resampling only occurs every n iterations of particle weight updates
 
 // . observation model parameters
-#define d_long 1.0d // 
-#define d_short 0.5d // 
-#define sigma_s 0.75d // std deviation of the LiDAR sensor measurements
-#define gamma 0.75d // scalar on the weight updates for each point in the scan
+#define d_long 1.4125811834208848d // 
+#define d_short 0.29310317998398416d // 
+#define sigma_s 0.06150727924684293d // std deviation of the LiDAR sensor measurements
+#define gamma 0.8675178577802246d // scalar on the weight updates for each point in the scan
 
 // . motion model noise parameters
-DEFINE_double(k1, 0.5, "Error in translation from translation motion");
-DEFINE_double(k2, 0.5, "Error in rotation from translation motion");
-DEFINE_double(k3, 0.1, "Error in rotation from rotation motion");
-DEFINE_double(k4, 0.1, "Error in translation from rotation motion");
+DEFINE_double(k1, 0.1162717479466416, "Error in translation from translation motion");
+DEFINE_double(k2, 0.04713928753470222, "Error in rotation from translation motion");
+DEFINE_double(k3, 0.3090170648182722, "Error in rotation from rotation motion");
+DEFINE_double(k4, 0.22241931763470535, "Error in translation from rotation motion");
 DEFINE_double(k5, 0.5, "Error in translation from translation motion along major axis");
 DEFINE_double(k6, 0.5, "Error in translation from translation motion along minor axis");
 
