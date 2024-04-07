@@ -48,7 +48,7 @@ using std::swap;
 using namespace math_util;
 using namespace ros_helpers;
 
-DEFINE_double(resolution, 0.25, "Global Planner Cell resolution");
+DEFINE_double(resolution, 0.5, "Global Planner Cell resolution");
 DEFINE_double(max_wall_margin, 0.75, "Maximum margin to consider for walls");
 
 namespace {
@@ -855,7 +855,7 @@ void Navigation::ObstacleDetector() {
   // }
 
   // // Create an obstacle based on how many points fall within the cell
-  int point_count_threshold = 100;
+  int point_count_threshold = 10;
   float discrete_multiplier = 1.0 / FLAGS_resolution; // makes it discrete
   
   std::map<std::pair<int,int>,bool> unseen_obstacle_grid;
@@ -897,11 +897,11 @@ void Navigation::ObstacleDetector() {
 
       for (const auto& cell: unseen_obstacle_grid) { 
         const auto& key = cell.first; // Extracting the key
-        obstacle_grid_counts[key]--;
+        obstacle_grid_counts[key]-=10;
         if (obstacle_grid_counts[key] <= point_count_threshold) {
           cells_to_erase.push_back(key);
         }
-        if (obstacle_grid_counts[key] == 0)
+        if (obstacle_grid_counts[key] <= 0)
         {
           obstacle_grid_counts.erase(key);
 
