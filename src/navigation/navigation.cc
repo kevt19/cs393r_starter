@@ -48,7 +48,7 @@ using std::swap;
 using namespace math_util;
 using namespace ros_helpers;
 
-DEFINE_double(resolution, 0.5, "Global Planner Cell resolution");
+DEFINE_double(resolution, 0.25, "Global Planner Cell resolution");
 DEFINE_double(max_wall_margin, 0.75, "Maximum margin to consider for walls");
 
 namespace {
@@ -712,7 +712,7 @@ Eigen::Vector2f Navigation::ClosestPointOnLine(const geometry::line2f line_seg, 
 // Fills in closest_point with the coords of the closest point to the car on the line segment closest to the car
 // Returns true if the car is close enough to any segment, false otherwise
 bool Navigation::ValidatePlan(const std::vector<Vector2f> global_plan, const Eigen::Vector2f r_loc, int* closest_waypoint_idx){
-  float MIN_CLOSEST_DIST = 0.5;
+  float MIN_CLOSEST_DIST = 1;
   visualization::DrawArc(Vector2f(0,0), MIN_CLOSEST_DIST, 0, 2 * 3.14, 0x00FF00, local_viz_msg_);
 
   for(int i = global_plan.size() - 1; i >= 0; i--){
@@ -961,7 +961,13 @@ void Navigation::Run() {
     }
 
     int closest_waypoint_idx = 0;
-    // bool is_plan_valid = ValidatePlan(waypoints, robot_loc_, &closest_waypoint_idx);
+    bool is_plan_valid = ValidatePlan(waypoints, robot_loc_, &closest_waypoint_idx);
+    if (!is_plan_valid){
+      if (waypoints.size() > 0){
+        nav_goal_loc_ = waypoints[waypoints.size() - 1];
+        SetNavGoal(nav_goal_loc_, robot_angle_);
+      }
+    }
     // cout << "Is plan valid: " << is_plan_valid << endl;
     // visualization::DrawCross(waypoints[closest_waypoint_idx], 0.06, 0x00FF00, global_viz_msg_);
 
