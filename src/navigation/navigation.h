@@ -78,7 +78,7 @@ class Navigation {
   bool ValidatePlan(const std::vector<Eigen::Vector2f> global_plan, const Eigen::Vector2f r_loc, int* closest_waypoint_idx);
   Eigen::Vector2f GetCarrot(std::vector<Eigen::Vector2f> global_plan, const Eigen::Vector2f r_loc, float r_angle, size_t start_waypoint_idx);
   void ObstacleDetector();
-  void ObstacleAvoidance();
+  void LocalObstacleAvoidance();
 
 
  private:

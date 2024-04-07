@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+#include <limits>
 #include "gflags/gflags.h"
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
@@ -126,14 +127,14 @@ std::vector<Eigen::Vector2f> Navigation::GetNeighborhoodOfWallPoints(
     // Generate margins and distances
     printf("\nMax wall margin: %f\n", margin);
     std::vector<double> margins;
-    for(double m = -1.0 * margin; m < margin; m += FLAGS_resolution) {
+    for(double m = -1.0 * margin; m < margin; m += 0.05) {
       printf("Margin: %f\n", m);
       margins.push_back(m);
     }
     if (margin < FLAGS_resolution) margins.push_back(margin);
     
     std::vector<double> distances;
-    for(double d = 0; d < lineLength; d += FLAGS_resolution) {
+    for(double d = 0; d < lineLength; d += 0.05) {
         distances.push_back(d);
         printf("Distance: %f\n", d);
     }
@@ -181,7 +182,7 @@ void Navigation::PopulateWallOccupancyGrid() {
   // add empty wall occupancy grid to make code more straightforward
   std::map<std::pair<int, int>, bool> emptyWallOccupancyGrid;
   wall_occupancy_grids.push_back(emptyWallOccupancyGrid);
-  }
+}
 
 void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
     // run A* and generate a set of waypoints
@@ -191,33 +192,36 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
     global_plan_grid.clear();
     // discretize the map
     float discrete_multiplier = 1.0 / FLAGS_resolution; // makes it discrete
-    printf("Resolution: %f\n", FLAGS_resolution);
-    printf("Discrete multiplier: %f\n", discrete_multiplier);
 
     // convert robot_loc and nav_goal_loc to discrete
-    int robot_x_discrete = robot_loc_.x() * discrete_multiplier;
-    int robot_y_discrete = robot_loc_.y() * discrete_multiplier;
+    // int robot_x_discrete = robot_loc_.x() * discrete_multiplier;
+    // int robot_y_discrete = robot_loc_.y() * discrete_multiplier;
     int goal_x_discrete = nav_goal_loc_.x() * discrete_multiplier;
     int goal_y_discrete = nav_goal_loc_.y() * discrete_multiplier;
     // convert back
-    float robot_x = robot_x_discrete / discrete_multiplier;
-    float robot_y = robot_y_discrete / discrete_multiplier;
+    // float robot_x = robot_x_discrete / discrete_multiplier;
+    // float robot_y = robot_y_discrete / discrete_multiplier;
+
+    // use actual values for start, otherwise possibility of going through walls!
+    // (because of rounding)
+    float robot_x = robot_loc_.x();
+    float robot_y = robot_loc_.y();
     float goal_x = goal_x_discrete / discrete_multiplier;
     float goal_y = goal_y_discrete / discrete_multiplier;
 
     Eigen::Vector2f start = Eigen::Vector2f(robot_x, robot_y);
     Eigen::Vector2f goal = Eigen::Vector2f(goal_x, goal_y);
 
-    float map_min_x = 1000.0;
-    float map_min_y = 1000.0;
-    float map_max_x = -1000.0;
-    float map_max_y = -1000.0;
+    float map_min_x = std::numeric_limits<float>::max();
+    float map_min_y = std::numeric_limits<float>::max();
+    float map_max_x = std::numeric_limits<float>::min();
+    float map_max_y = std::numeric_limits<float>::min();
 
     vector<geometry::line2f> all_map_lines;
     float max_map_range = 1000.0;
     map_.GetSceneLines(robot_loc_, max_map_range, &all_map_lines);
     int all_map_lines_size = all_map_lines.size();
-    for (int i = 0; i < all_map_lines_size; i++){
+    for (int i = 0; i < all_map_lines_size; i++) {
       Eigen::Vector2f p0 = all_map_lines[i].p0;
       Eigen::Vector2f p1 = all_map_lines[i].p1;
       map_min_x = min(map_min_x, min(p0.x(), p1.x()));
@@ -229,18 +233,15 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
     int n_wall_occupancy_grids = wall_occupancy_grids.size();
     printf("Number of wall occupancy grids: %d\n", n_wall_occupancy_grids);
     for (int i = 0; i < n_wall_occupancy_grids; i++){
-      vector<geometry::line2f> lines_list;
       std::map<std::pair<int, int>, bool> wallOccupancyGrid = wall_occupancy_grids[i];
       // A* search
-      float dummyValue = FLAGS_max_wall_margin - i * 0.05;
 
       std::map<std::pair<int, int>, bool> visited;
       std::map<std::pair<int, int>, float> distanceFromOrigin;
       std::map<std::pair<int, int>, std::pair<int, int>> waypointToParent;
       vector<Eigen::Vector2f> neighbors;
-      vector<geometry::line2f> mapWallsWithDummys;
 
-      int maxIterations = 10000000;
+      int maxIterations = 10000000; // for A*
       // Loop until we reach goal or max iterations
       std::vector<Eigen::Vector2f>::iterator neighborsIter;
       std::vector<geometry::line2f> possiblePaths;
@@ -295,7 +296,6 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
           std::pair<int, int> backtrack = std::make_pair(x_discrete, y_discrete);
           bool has_parent = true;
           while (has_parent){
-            printf("current x: %d, y: %d\n", backtrack.first, backtrack.second);
             x_discrete = backtrack.first;
             y_discrete = backtrack.second;
             x = x_discrete / discrete_multiplier;
@@ -339,21 +339,14 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
         } 
         float max_range = 3.0 * FLAGS_resolution / 2;
 
-        const float x_min = x - max_range;
-        const float y_min = y - max_range;
-        const float x_max = x + max_range;
-        const float y_max = y + max_range;
-        lines_list.clear();
-        for (const geometry::line2f& l : mapWallsWithDummys) {
-          if (l.p0.x() < x_min && l.p1.x() < x_min) continue;
-          if (l.p0.y() < y_min && l.p1.y() < y_min) continue;
-          if (l.p0.x() > x_max && l.p1.x() > x_max) continue;
-          if (l.p0.y() > y_max && l.p1.y() > y_max) continue;
-          lines_list.push_back(l);
-        }
+        // const float x_min = x - max_range;
+        // const float y_min = y - max_range;
+        // const float x_max = x + max_range;
+        // const float y_max = y + max_range;
+        vector<geometry::line2f> neabyWalls;
 
         Eigen::Vector2f currentLocation = Eigen::Vector2f(x, y);
-        map_.GetSceneLines(currentLocation, max_range, &lines_list);
+        map_.GetSceneLines(currentLocation, max_range, &neabyWalls);
         // create line segment from x, y to neighbor
         for (neighborsIter = neighbors.begin(); neighborsIter != neighbors.end(); neighborsIter++){
           Eigen::Vector2f neighbor = *neighborsIter;  
@@ -377,15 +370,13 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
             continue;
           }
 
+          // final check if it intersects with any walls
           geometry::line2f currentLine = geometry::line2f(x, y, neighbor_x, neighbor_y);
           possiblePaths.push_back(currentLine);
-
           bool validNeighbor = true;
-          int n_lines = lines_list.size();
+          int n_lines = neabyWalls.size();
           for (int j = 0; j < n_lines; j++){
-            // printf("Checking intersection with map line x1 %f, y1 %f, x2 %f, y2 %f\n", lines_list[j].p0.x(), lines_list[j].p0.y(), lines_list[j].p1.x(), lines_list[j].p1.y());
-            if (lines_list[j].Intersects(currentLine)){
-              // if it intersects, remove the line segment
+            if (neabyWalls[j].Intersects(currentLine)){
               validNeighbor = false;
               break;
             }
@@ -397,11 +388,12 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
         
         int nPossiblePaths = possiblePaths.size();
         for (int i = 0; i < nPossiblePaths; i++){
-          Eigen::Vector2f selectedWaypoint = possiblePaths[i].p1; int n_waypoints = waypoints.size();
-            if (n_waypoints > 0){
-              nav_goal_loc_ = waypoints[n_waypoints - 1];
-              SetNavGoal(nav_goal_loc_, robot_angle_);
-            }
+          Eigen::Vector2f selectedWaypoint = possiblePaths[i].p1; 
+          // int n_waypoints = waypoints.size();
+          //   if (n_waypoints > 0){
+          //     nav_goal_loc_ = waypoints[n_waypoints - 1];
+          //     SetNavGoal(nav_goal_loc_, robot_angle_);
+          //   }
 
           float next_x = selectedWaypoint.x();
           float next_y = selectedWaypoint.y();
@@ -410,14 +402,13 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
           next_x = next_x_discrete / discrete_multiplier;
           next_y = next_y_discrete / discrete_multiplier;
 
-          // let's use actual distance for distance calculation
           float distanceToNode = (selectedWaypoint - currentLocation).norm(); 
-          // float distanceToNode = FLAGS_resolution;
           float h = (selectedWaypoint - goal).norm();
           float g = actualDistanceSoFar + distanceToNode;
 
           // if it does not have a parent, add it to the parent map
-          if (waypointToParent.find(std::make_pair(next_x_discrete, next_y_discrete)) == waypointToParent.end()){
+          if (waypointToParent.find(std::make_pair(next_x_discrete, next_y_discrete)) == waypointToParent.end())
+          {
             waypointToParent[std::make_pair(next_x_discrete, next_y_discrete)] = std::make_pair(x_discrete, y_discrete);
             distanceFromOrigin[std::make_pair(next_x_discrete, next_y_discrete)] = g;
           }
@@ -433,13 +424,12 @@ void Navigation::SetNavGoal(const Vector2f& loc, float angle) {
               g = distanceFromExistingParent; // otherwise let's use it
             }
           }
-          searchQueue.Push(selectedWaypoint, -1.0 * (g + h));
+          searchQueue.Push(selectedWaypoint, -1.0 * (g + h)); // negative because we want to pop the smallest value
         }
         waypointIdx++;
       }
       if (waypoints.size() == 0) {
-        printf("No waypoints found, will try lower dummy value if > 0.0\n");
-        dummyValue -= 0.05;
+        printf("No waypoints found, will try less strict wall occupancy grid...\n");
       }
       else {
         nav_goal_loc_ = waypoints[0];
@@ -487,7 +477,7 @@ PathOption SelectOptimalPath(vector<PathOption> path_options, Vector2f short_ter
   result.free_path_length = 0;
   result.clearance = 0;
   result.curvature = 0;
-  float max_score = -100000.0;
+  float max_score = std::numeric_limits<float>::min();
   for(auto p : path_options){
     if (fabs(p.curvature) < kEpsilon){
       continue;
@@ -503,7 +493,7 @@ PathOption SelectOptimalPath(vector<PathOption> path_options, Vector2f short_ter
   return result;
 }
 
-void Navigation::ObstacleAvoidance() {
+void Navigation::LocalObstacleAvoidance() {
   // Vector2f short_term_goal(10,0);
   float goal_x = nav_goal_loc_.x();
   float goal_y = nav_goal_loc_.y();
@@ -511,6 +501,8 @@ void Navigation::ObstacleAvoidance() {
   float rotation = robot_angle_;
   float translationX = robot_loc_.x();
   float translationY = robot_loc_.y();
+  printf("Robot loc x: %f, y: %f\n", translationX, translationY);
+  printf("Goal x: %f, y: %f\n", goal_x, goal_y);
   float newX = cos(rotation) * (goal_x - translationX) + sin(rotation) * (goal_y - translationY);
   float newY = -sin(rotation) * (goal_x - translationX) + cos(rotation) * (goal_y - translationY);
   Eigen::Vector2f short_term_goal = Eigen::Vector2f(newX, newY);
@@ -667,15 +659,14 @@ PathOption Navigation::GetFreePathLength(PathOption p, Eigen::Vector2f short_ter
 }
 
 void Navigation::OneDTOC(PathOption p, Vector2f stg){
-  // float dist_to_travel = p.free_path_length - 0.2;
-  // float w1 = 0.5;
-  // float w2 = 0.5;
-  float dist_to_travel = p.free_path_length -0.2;
+  float dist_to_travel = p.free_path_length - 0.2;
   // float dist_to_travel = (stg - p.closest_point).norm();
   float curvature = p.curvature;
   float speed = robot_vel_.norm();
   drive_msg_.curvature = curvature;
+  printf("Free path length %f\n", p.free_path_length);
   if (dist_to_travel < STOPPING_DISTANCE_){
+    printf("Stopping.\n");
     // Decelerate
     drive_msg_.velocity = max<float>(0.0, speed - DELTA_T_*MAX_DEACCL_);
   } else if (speed < MAX_SPEED_) {
@@ -718,14 +709,12 @@ bool Navigation::ValidatePlan(const std::vector<Vector2f> global_plan, const Eig
   for(int i = global_plan.size() - 1; i >= 0; i--){
     float dist_to_waypoint = (global_plan[i] - r_loc).norm();
     geometry::line2f plan_segment(global_plan[i], global_plan[i-1]);
-
     // Check if the car is close enough to this segment
     if(dist_to_waypoint < MIN_CLOSEST_DIST){
       *closest_waypoint_idx = i;
       return true;
     }
   }
-
   return false;
 }
 
@@ -817,13 +806,13 @@ Eigen::Vector2f Navigation::GetCarrot(vector<Vector2f> global_plan, const Eigen:
   // If the above math blows up for some unforseen reason, this allows the robot to keep going instead of halting
   if(std::isnan(carrot_map.x()) || std::isnan(carrot_map.y())){
     carrot_map =  global_plan[start_waypoint_idx + 1];
+    return carrot_map;
   }
 
-  return carrot_map;
-  
+  // return carrot_map;
 
   // Now we have a carrot in map frame, need to convert to baselink frame
-  cout << "Carrot Map: " << carrot_map << endl;
+  // cout << "Carrot Map: " << carrot_map << endl;
   Eigen::Rotation2Df r_map_to_baselink(r_angle);
   Eigen::Matrix2f R = r_map_to_baselink.toRotationMatrix();
   Eigen::Matrix3f T_map_to_baselink;
@@ -880,7 +869,6 @@ void Navigation::ObstacleDetector() {
 
       // Check if the count exceeds the threshold
       if (obstacle_grid_counts[cell] > point_count_threshold) {
-          // std::cout << "Cell (" << cellX << ", " << cellY << ") has more than " << point_count_threshold << " points." << std::endl;
           obstacle_occupancy_grid[cell] = true; 
           // check if same cell as anything in global plan
           if (global_plan_grid.find(cell) != global_plan_grid.end()){
@@ -888,7 +876,9 @@ void Navigation::ObstacleDetector() {
             int n_waypoints = waypoints.size();
             if (n_waypoints > 0){
               nav_goal_loc_ = waypoints[n_waypoints - 1];
+              printf("Replanning hereEWHUFIOEJIOEWFJIEJIDIJED!\n");
               SetNavGoal(nav_goal_loc_, robot_angle_);
+              break;
             }
         }
     }
@@ -932,117 +922,72 @@ void Navigation::Run() {
 
   // The control iteration goes here. 
   // Feel free to make helper functions to structure the control appropriately.
+  // LocalObstacleAvoidance();
+  // The latest observed point cloud is accessible via "point_cloud_"
+
+  // Determine if we already reached a waypoint
+  if (waypoints.size() > 0)
+  {
+    for (unsigned int i = 0; i < waypoints.size(); i++)
+    {
+      Eigen::Vector2f waypoint = waypoints[i];
+      float distance = (waypoint - robot_loc_).norm();
+      if (distance < 0.5) {
+        // then we start from the next waypoint and erase the others
+        waypoints.erase(waypoints.begin(), waypoints.begin() + i + 1);
+        if (waypoints.size() > 0) {
+          nav_goal_loc_ = waypoints[0];
+        }
+        else {
+          nav_goal_loc_ = robot_loc_;
+        }
+        break;
+      }
+    }
+
+    int closest_waypoint_idx = 0;
+    bool is_plan_valid = ValidatePlan(waypoints, robot_loc_, &closest_waypoint_idx);
+    if (!is_plan_valid)
+    {
+      if (waypoints.size() > 0)
+      {
+        nav_goal_loc_ = waypoints[waypoints.size() - 1];
+        printf("Invalid plan??????\n");
+        SetNavGoal(nav_goal_loc_, nav_goal_angle_);
+      }
+    }
+    Vector2f carrot;
+    if (waypoints.size() > 1) 
+    {
+      carrot = GetCarrot(waypoints, robot_loc_, robot_angle_, closest_waypoint_idx);
+    }
+    else 
+    {
+      carrot = waypoints[waypoints.size() - 1];
+    }
+    nav_goal_loc_ = carrot;
+  }
+  else
+  {
+    nav_goal_loc_ = robot_loc_;
+  }
+
+  // Draw waypoints from A*
+  vector<Eigen::Vector2f>::iterator iter;
+  for (iter = waypoints.begin(); iter != waypoints.end(); iter++){
+    Eigen::Vector2f waypoint = *iter;
+    visualization::DrawCross(waypoint, 0.15, 0x00FF00, global_viz_msg_);
+  }
+  ObstacleDetector(); // for the global planner
+
   PathOption p;
   p.free_path_length = 1.0;
   p.curvature = 1.0;
   p.clearance = 1.0;
   // OneDTOC(p);
-  ObstacleAvoidance(); // for the local planner
-  // ObstacleAvoidance();
-  // The latest observed point cloud is accessible via "point_cloud_"
+  LocalObstacleAvoidance(); // for the local planner
 
-  // Determine if we already reached a waypoint
-  if (waypoints.size() > 0){
-
-    for (unsigned int i = 0; i < waypoints.size(); i++){
-          Eigen::Vector2f waypoint = waypoints[i];
-          float distance = (waypoint - robot_loc_).norm();
-          if (distance < 1){
-            // then we start from the next waypoint and erase the others
-            waypoints.erase(waypoints.begin(), waypoints.begin() + i + 1);
-            if (waypoints.size() > 0) {
-              nav_goal_loc_ = waypoints[0];
-            }
-            else {
-              nav_goal_loc_ = robot_loc_;
-            }
-            break;
-          }
-    }
-
-    int closest_waypoint_idx = 0;
-    bool is_plan_valid = ValidatePlan(waypoints, robot_loc_, &closest_waypoint_idx);
-    if (!is_plan_valid){
-      if (waypoints.size() > 0){
-        nav_goal_loc_ = waypoints[waypoints.size() - 1];
-        SetNavGoal(nav_goal_loc_, robot_angle_);
-      }
-    }
-    // cout << "Is plan valid: " << is_plan_valid << endl;
-    // visualization::DrawCross(waypoints[closest_waypoint_idx], 0.06, 0x00FF00, global_viz_msg_);
-
-    // waypoints.erase(waypoints.begin(), waypoints.begin() + closest_waypoint_idx);
-    Vector2f carrot;
-    if (waypoints.size() > 1) {
-      carrot = GetCarrot(waypoints, robot_loc_, robot_angle_, closest_waypoint_idx);
-    }
-    else {
-      carrot = waypoints[waypoints.size() - 1];
-    }
-    //visualization::DrawCross(carrot, 0.07, 0x0000FF, global_viz_msg_);
-    nav_goal_loc_ = carrot;
-  }
-  else{
-    nav_goal_loc_ = robot_loc_;
-  }
-
-  // Eigen::Rotation2Df r_map_to_baselink(-1.0 * robot_angle_);
-  // Eigen::Matrix2f R = r_map_to_baselink.toRotationMatrix();
-  // Eigen::Matrix3f T_map_to_baselink;
-
-  // float translationX = robot_loc_.x();
-  // float translationY = robot_loc_.y();
-
-  // T_map_to_baselink << R(0,0), R(0,1), 0,
-  //                     R(1,0), R(1,1), 0,
-  //                     0,      0,      1;
- 
-  // Eigen::Vector3f translation(translationX, translationY, 0.0f);
-
-  // Draw waypoints from A*
-  // iterate over waypoints
-  vector<Eigen::Vector2f>::iterator iter;
-  // Eigen::Vector2f previousWaypoint = Eigen::Vector2f(0, 0);
-  for (iter = waypoints.begin(); iter != waypoints.end(); iter++){
-    Eigen::Vector2f waypoint = *iter;
-    // swap out x, y
-    // float x = waypoint.x();
-    // float y = waypoint.y();
-
-    // Eigen::Vector3f point_to_transform(x, y, 1.0f);
-
-    // point_to_transform = point_to_transform - translation;
-    // Eigen::Vector3f transformed_point = T_map_to_baselink * point_to_transform;
-    // Eigen::Vector2f robot_frame_waypoint(transformed_point[0], transformed_point[1]);
-    visualization::DrawCross(waypoint, 0.15, 0x00FF00, global_viz_msg_);
-    // visualization::DrawLine(previousWaypoint, waypoint, 0x00FF00, global_viz_msg_);
-    // previousWaypoint = waypoint;
-  }
-  ObstacleDetector(); // for the global planner
-
-  // Eigen::Vector2f waypoint = Eigen::Vector2f(0, 0);
-  // visualization::DrawCross(waypoint, 0.4, 0x000000, local_viz_msg_);
-
-
-  //Eigen::Vector2f origin = Eigen::Vector2f(0, 0);
-  //Eigen::Vector2f goal = Eigen::Vector2f(10, 10);
-  //visualization::DrawLine(origin, goal, 0x00FF00, local_viz_msg_);
   viz_pub_.publish(local_viz_msg_);
   viz_pub_.publish(global_viz_msg_);
-
-
-  // Eventually, you will have to set the control values to issue drive commands:
-  // drive_msg_.curvature = ...;
-  // drive_msg_.velocity = ...;
-
-  // Add timestamps to all messages.
-  // local_viz_msg_.header.stamp = ros::Time::now();
-  // global_viz_msg_.header.stamp = ros::Time::now();
-  // drive_msg_.header.stamp = ros::Time::now();
-  // // Publish messages.
-  // viz_pub_.publish(local_viz_msg_);
-  // viz_pub_.publish(global_viz_msg_);
-  // drive_pub_.publish(drive_msg_);
-}
-
+  }
 }  // namespace navigation

@@ -62,6 +62,7 @@ using ros_helpers::SetRosVector;
 using std::string;
 using std::vector;
 using Eigen::Vector2f;
+using Eigen::Vector2d;
 
 // Create command line arguments
 DEFINE_string(laser_topic, "scan", "Name of ROS topic for LIDAR data");
