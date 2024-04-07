@@ -68,7 +68,6 @@ using visualization::DrawParticle;
 // Create command line arguements
 DEFINE_string(laser_topic, "/scan", "Name of ROS topic for LIDAR data");
 DEFINE_string(odom_topic, "/odom", "Name of ROS topic for odometry data");
-DEFINE_string(reference_topic, "/reference_localization", "Name of ROS topic for reference localization data");
 DEFINE_string(init_topic,
               "/set_pose",
               "Name of ROS topic for initialization");
@@ -94,12 +93,6 @@ sensor_msgs::LaserScan last_laser_msg_;
 vector<Vector2f> trajectory_points_;
 string current_map_;
 
-double loc_score_ = 0;
-double loc_score_n_ = 1;
-double angle_score_ = 0;
-double angle_score_n_ = 1;
-bool scoring_initialized_ = false;
-
 void InitializeMsgs() {
   std_msgs::Header header;
   header.frame_id = "map";
@@ -111,18 +104,18 @@ void InitializeMsgs() {
 void PublishParticles() {
   vector<particle_filter::Particle> particles;
   particle_filter_.GetParticles(&particles);
+  // std::cout << "Particles: " << particles.size() << std::endl;
   for (const particle_filter::Particle& p : particles) {
     DrawParticle(p.loc, p.angle, vis_msg_);
   }
 }
 
 void PublishPredictedScan() {
-  const uint32_t kColor = 0xd67d00;
+  const uint32_t kColor = 0x275c21;
   Vector2f robot_loc(0, 0);
   float robot_angle(0);
   particle_filter_.GetLocation(&robot_loc, &robot_angle);
   vector<Vector2f> predicted_scan;
-  vector<double> predicted_ranges;
   particle_filter_.GetPredictedPointCloud(
       robot_loc,
       robot_angle,
@@ -131,8 +124,7 @@ void PublishPredictedScan() {
       last_laser_msg_.range_max,
       last_laser_msg_.angle_min,
       last_laser_msg_.angle_max,
-      &predicted_scan,
-      &predicted_ranges);
+      &predicted_scan);
   for (const Vector2f& p : predicted_scan) {
     DrawPoint(p, kColor, vis_msg_);
   }
@@ -178,6 +170,7 @@ void PublishVisualization() {
 }
 
 void LaserCallback(const sensor_msgs::LaserScan& msg) {
+  // std::cout << "In laser callback" << std::endl;
   if (FLAGS_v > 0) {
     printf("Laser t=%f\n", msg.header.stamp.toSec());
   }
@@ -204,6 +197,7 @@ void PublishLocation() {
 }
 
 void OdometryCallback(const nav_msgs::Odometry& msg) {
+  // std::cout << "In odom callback" << std::endl;
   if (FLAGS_v > 0) {
     printf("Odometry t=%f\n", msg.header.stamp.toSec());
   }
@@ -221,12 +215,6 @@ string GetMapFileFromName(const string& map) {
 }
 
 void InitCallback(const amrl_msgs::Localization2DMsg& msg) {
-  scoring_initialized_ = true;
-  loc_score_ = 0;
-  loc_score_n_ = 1;
-  angle_score_ = 0;
-  angle_score_n_ = 1;
-
   const Vector2f init_loc(msg.pose.x, msg.pose.y);
   const float init_angle = msg.pose.theta;
   current_map_ = msg.map;
@@ -238,32 +226,6 @@ void InitCallback(const amrl_msgs::Localization2DMsg& msg) {
          RadToDeg(init_angle));
   particle_filter_.Initialize(map_file, init_loc, init_angle);
   trajectory_points_.clear();
-}
-
-void ReferenceCallback(const amrl_msgs::Localization2DMsg& msg) {
-  if(!scoring_initialized_){
-    return;
-  }
-
-  Vector2f robot_loc(0, 0);
-  float robot_angle(0);
-  particle_filter_.GetLocation(&robot_loc, &robot_angle);
-
-  // cout << robot_loc[0] << " " << robot_loc[1] << " " << robot_angle << endl;
-  // cout << msg.pose << endl << endl;
-
-  double euclidean_distance = sqrt(pow(msg.pose.x - robot_loc[0], 2) + pow(msg.pose.y - robot_loc[1], 2));
-  double angular_diff = std::min(abs(msg.pose.theta - robot_angle), 2 * 3.14159f - abs(msg.pose.theta - robot_angle));
-  double abs_angular_diff = abs(angular_diff);
-
-  loc_score_ = loc_score_ + (euclidean_distance - loc_score_) / loc_score_n_;
-  loc_score_n_ += 1;
-
-  angle_score_ = angle_score_ + (abs_angular_diff - angle_score_) / angle_score_n_;
-  angle_score_n_ += 1;
-
-  cout << "loc score: " << loc_score_ << endl;
-  cout << "angle score: " << angle_score_ << endl << endl;
 }
 
 void ProcessLive(ros::NodeHandle* n) {
@@ -279,10 +241,6 @@ void ProcessLive(ros::NodeHandle* n) {
       FLAGS_odom_topic.c_str(),
       1,
       OdometryCallback);
-  ros::Subscriber reference_sub = n->subscribe(
-      FLAGS_reference_topic.c_str(),
-      1,
-      ReferenceCallback);
   particle_filter_.Initialize(
       GetMapFileFromName(current_map_),
       Vector2f(CONFIG_init_x_, CONFIG_init_x_),
@@ -323,3 +281,4 @@ int main(int argc, char** argv) {
 
   return 0;
 }
+
