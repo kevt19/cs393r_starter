@@ -966,8 +966,13 @@ void Navigation::Run() {
     // visualization::DrawCross(waypoints[closest_waypoint_idx], 0.06, 0x00FF00, global_viz_msg_);
 
     // waypoints.erase(waypoints.begin(), waypoints.begin() + closest_waypoint_idx);
-    
-    Vector2f carrot = GetCarrot(waypoints, robot_loc_, robot_angle_, closest_waypoint_idx);
+    Vector2f carrot;
+    if (waypoints.size() > 1) {
+      carrot = GetCarrot(waypoints, robot_loc_, robot_angle_, closest_waypoint_idx);
+    }
+    else {
+      carrot = waypoints[waypoints.size() - 1];
+    }
     //visualization::DrawCross(carrot, 0.07, 0x0000FF, global_viz_msg_);
     nav_goal_loc_ = carrot;
   }
