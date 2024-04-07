@@ -469,7 +469,6 @@ void Navigation::ObservePointCloud(const vector<Vector2f>& cloud,
 
 }
 
-
 PathOption SelectOptimalPath(vector<PathOption> path_options, Vector2f short_term_goal){
   PathOption result;
   float w_dist_to_goal = -2.0;
@@ -477,7 +476,7 @@ PathOption SelectOptimalPath(vector<PathOption> path_options, Vector2f short_ter
   result.free_path_length = 0;
   result.clearance = 0;
   result.curvature = 0;
-  float max_score = std::numeric_limits<float>::min();
+  float max_score = -100000.0;
   for(auto p : path_options){
     if (fabs(p.curvature) < kEpsilon){
       continue;
@@ -488,10 +487,41 @@ PathOption SelectOptimalPath(vector<PathOption> path_options, Vector2f short_ter
       max_score = score;
       result = p;
     }
-    // printf("Curvature %f, Distance to goal %f, Clearance %f, Free path length %f, score %f\n", p.curvature, distance, p.clearance, p.free_path_length, score);
+    printf("Curvature %f, Distance to goal %f, Clearance %f, Free path length %f, score %f\n", p.curvature, distance, p.clearance, p.free_path_length, score);
   }
   return result;
 }
+
+// PathOption SelectOptimalPath(vector<PathOption> path_options, Vector2f short_term_goal){
+//   PathOption result;
+//   float w_dist_to_goal = -2.0;
+//   float w_clearance = 5;
+//   result.free_path_length = 0;
+//   result.clearance = 0;
+//   result.curvature = 0;
+//   float max_score = -100000.0;
+//   unsigned int n = path_options.size();
+//   printf("Number of path options: %d\n", n);
+//   for(auto p : path_options){
+//     printf("Curvature %f\n", p.curvature);
+//     if (fabs(p.curvature) < kEpsilon){
+//       continue;
+//     }
+//     printf("Short term goal x: %f, y: %f\n", short_term_goal.x(), short_term_goal.y());
+//     printf("Closest point x: %f, y: %f\n", p.closest_point.x(), p.closest_point.y());
+
+//     float distance = (p.closest_point - short_term_goal).norm();
+//     printf("Distance to goal: %f\n", distance);
+//     float score = p.free_path_length + w_clearance*p.clearance + w_dist_to_goal*distance;
+//     if (score > max_score){
+//       printf("NEW MAX SCORE... %f\n", score);
+//       max_score = score;
+//       result = p;
+//     }
+//     // printf("Curvature %f, Distance to goal %f, Clearance %f, Free path length %f, score %f\n", p.curvature, distance, p.clearance, p.free_path_length, score);
+//   }
+//   return result;
+// }
 
 void Navigation::LocalObstacleAvoidance() {
   // Vector2f short_term_goal(10,0);
@@ -501,8 +531,6 @@ void Navigation::LocalObstacleAvoidance() {
   float rotation = robot_angle_;
   float translationX = robot_loc_.x();
   float translationY = robot_loc_.y();
-  printf("Robot loc x: %f, y: %f\n", translationX, translationY);
-  printf("Goal x: %f, y: %f\n", goal_x, goal_y);
   float newX = cos(rotation) * (goal_x - translationX) + sin(rotation) * (goal_y - translationY);
   float newY = -sin(rotation) * (goal_x - translationX) + cos(rotation) * (goal_y - translationY);
   Eigen::Vector2f short_term_goal = Eigen::Vector2f(newX, newY);
@@ -600,6 +628,7 @@ PathOption Navigation::GetFreePathLength(PathOption p, Eigen::Vector2f short_ter
       clearance = min(clearance, fabs(p.y()));
     }
     p.free_path_length = max<float>(0.0, ret_free_path_length);
+    printf("Free path length %f\n", p.free_path_length);
     p.clearance = clearance;
     p.obstruction = obstruction;
 
@@ -642,6 +671,8 @@ PathOption Navigation::GetFreePathLength(PathOption p, Eigen::Vector2f short_ter
 
   p.clearance = max<float>(0.0, clearance);
   p.free_path_length = max<float>(0.0, ret_free_path_length);
+
+  printf("Free path length %f\n", p.free_path_length);
   p.obstruction = obstruction;
   // printf("Clearance %f, Free Path Length %f, Curvature %f\n", p.clearance, p.free_path_length, p.curvature);
 
@@ -665,6 +696,7 @@ void Navigation::OneDTOC(PathOption p, Vector2f stg){
   float speed = robot_vel_.norm();
   drive_msg_.curvature = curvature;
   printf("Free path length %f\n", p.free_path_length);
+  printf("Curvature %f\n", p.curvature);
   if (dist_to_travel < STOPPING_DISTANCE_){
     printf("Stopping.\n");
     // Decelerate
@@ -945,27 +977,27 @@ void Navigation::Run() {
       }
     }
 
-    int closest_waypoint_idx = 0;
-    bool is_plan_valid = ValidatePlan(waypoints, robot_loc_, &closest_waypoint_idx);
-    if (!is_plan_valid)
-    {
-      if (waypoints.size() > 0)
-      {
-        nav_goal_loc_ = waypoints[waypoints.size() - 1];
-        printf("Invalid plan??????\n");
-        SetNavGoal(nav_goal_loc_, nav_goal_angle_);
-      }
-    }
-    Vector2f carrot;
-    if (waypoints.size() > 1) 
-    {
-      carrot = GetCarrot(waypoints, robot_loc_, robot_angle_, closest_waypoint_idx);
-    }
-    else 
-    {
-      carrot = waypoints[waypoints.size() - 1];
-    }
-    nav_goal_loc_ = carrot;
+    // int closest_waypoint_idx = 0;
+    // bool is_plan_valid = ValidatePlan(waypoints, robot_loc_, &closest_waypoint_idx);
+    // if (!is_plan_valid)
+    // {
+    //   if (waypoints.size() > 0)
+    //   {
+    //     nav_goal_loc_ = waypoints[waypoints.size() - 1];
+    //     printf("Invalid plan??????\n");
+    //     SetNavGoal(nav_goal_loc_, nav_goal_angle_);
+    //   }
+    // }
+    // Vector2f carrot;
+    // if (waypoints.size() > 1) 
+    // {
+    //   carrot = GetCarrot(waypoints, robot_loc_, robot_angle_, closest_waypoint_idx);
+    // }
+    // else 
+    // {
+    //   carrot = waypoints[waypoints.size() - 1];
+    // }
+    // nav_goal_loc_ = carrot;
   }
   else
   {
