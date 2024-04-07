@@ -67,15 +67,18 @@ class Navigation {
   void Run();
   // Used to set the next target pose.
   void SetNavGoal(const Eigen::Vector2f& loc, float angle);
-  void ObstacleAvoidance();
   void OneDTOC(PathOption p, Eigen::Vector2f stg);
+
+  void PopulateWallOccupancyGrid();
+  std::vector<Eigen::Vector2f> GetNeighborhoodOfWallPoints(const Eigen::Vector2f p0, 
+                                                           const Eigen::Vector2f p1,
+                                                           float margin);
 
   Eigen::Vector2f ClosestPointOnLine(const geometry::line2f line_seg, const Eigen::Vector2f point);
   bool ValidatePlan(const std::vector<Eigen::Vector2f> global_plan, const Eigen::Vector2f r_loc, int* closest_waypoint_idx);
   Eigen::Vector2f GetCarrot(std::vector<Eigen::Vector2f> global_plan, const Eigen::Vector2f r_loc, float r_angle, size_t start_waypoint_idx);
-
-
-
+  void ObstacleDetector();
+  void ObstacleAvoidance();
 
 
  private:
@@ -102,6 +105,13 @@ class Navigation {
   float odom_start_angle_;
   // Latest observed point cloud.
   std::vector<Eigen::Vector2f> point_cloud_;
+
+  std::map<std::pair<int, int>, int> obstacle_grid_counts;
+  // Create a map of obstacle bins
+  std::map<std::pair<int,int>,bool> obstacle_occupancy_grid; 
+
+  std::vector<std::map<std::pair<int, int>, bool>> wall_occupancy_grids;
+  std::map<std::pair<int, int>, bool> global_plan_grid;
 
   // Whether navigation is complete.
   bool nav_complete_;

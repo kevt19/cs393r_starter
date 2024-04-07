@@ -145,6 +145,7 @@ int main(int argc, char** argv) {
   ros::init(argc, argv, "navigation", ros::init_options::NoSigintHandler);
   ros::NodeHandle n;
   navigation_ = new Navigation(FLAGS_map, &n);
+  navigation_->PopulateWallOccupancyGrid();
 
   ros::Subscriber string_sub = 
       n.subscribe("string_topic", 1, &StringCallback);
@@ -157,6 +158,7 @@ int main(int argc, char** argv) {
       n.subscribe(FLAGS_laser_topic, 1, &LaserCallback);
   ros::Subscriber goto_sub =
       n.subscribe("/move_base_simple/goal", 1, &GoToCallback);
+
 
   RateLoop loop(20.0);
   while (run_ && ros::ok()) {
