@@ -938,7 +938,6 @@ void Navigation::Run() {
   p.clearance = 1.0;
   // OneDTOC(p);
   ObstacleAvoidance(); // for the local planner
-  ObstacleDetector(); // for the global planner
   // ObstacleAvoidance();
   // The latest observed point cloud is accessible via "point_cloud_"
 
@@ -992,6 +991,7 @@ void Navigation::Run() {
     visualization::DrawLine(previousWaypoint, robot_frame_waypoint, 0x00FF00, local_viz_msg_);
     previousWaypoint = robot_frame_waypoint;
   }
+  ObstacleDetector(); // for the global planner
 
   // Eigen::Vector2f waypoint = Eigen::Vector2f(0, 0);
   // visualization::DrawCross(waypoint, 0.4, 0x000000, local_viz_msg_);

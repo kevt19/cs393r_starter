@@ -85,8 +85,7 @@ class ParticleFilter {
                               float range_max,
                               float angle_min,
                               float angle_max,
-                              std::vector<Eigen::Vector2f>* scan,
-                              std::vector<double>* ranges_ptr);
+                              std::vector<Eigen::Vector2f>* scan);
 
  private:
 
@@ -104,9 +103,9 @@ class ParticleFilter {
   float prev_odom_angle_;
   bool odom_initialized_;
 
-  float dist_traveled_since_update_;
-
-  std::set<size_t> intersecting_map_indices_;
+  bool new_odometry_flag_;    // Flag to indicate odmometry change (robot movement)
+  int resampling_iteration_counter_;    // count the number of times Resample() has been called
+  Particle *top_particle_ = new Particle;  // Particle with max weight
 };
 }  // namespace slam
 
