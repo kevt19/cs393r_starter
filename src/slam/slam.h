@@ -24,6 +24,15 @@
 
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
+#include <gtsam/geometry/Pose2.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
+#include <gtsam/nonlinear/Values.h>
+#include <gtsam/slam/BetweenFactor.h>
+#include <gtsam/inference/Symbol.h>
+#include <gtsam/slam/PriorFactor.h>
+
+using namespace gtsam;
 
 #ifndef SRC_SLAM_H_
 #define SRC_SLAM_H_

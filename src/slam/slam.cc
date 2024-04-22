@@ -34,6 +34,13 @@
 
 #include "vector_map/vector_map.h"
 
+#include <gtsam/geometry/Pose2.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
+#include <gtsam/nonlinear/Values.h>
+
+using namespace gtsam;
+
 using namespace math_util;
 using Eigen::Affine2f;
 using Eigen::Rotation2Df;

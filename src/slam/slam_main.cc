@@ -88,6 +88,45 @@ void InitializeMsgs() {
 }
 
 void PublishMap() {
+
+  // Create a factor graph
+  NonlinearFactorGraph graph;
+
+  // Define noise models for the measurements
+  noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Sigmas(Vector3(0.3, 0.3, 0.1)); // Prior noise
+  noiseModel::Diagonal::shared_ptr model = noiseModel::Diagonal::Sigmas(Vector3(0.2, 0.2, 0.1));      // Odometry noise
+
+  // Add a prior factor on the first pose (anchor this pose as the reference)
+  graph.add(PriorFactor<Pose2>(1, Pose2(0, 0, 0), priorNoise));
+
+  // Add odometry factors
+  // Here, the robot moves 2 meters forward, then turns 90 degrees right three times
+  graph.add(BetweenFactor<Pose2>(1, 2, Pose2(2, 0, 0), model));
+  graph.add(BetweenFactor<Pose2>(2, 3, Pose2(2, 0, -M_PI_2), model));
+  graph.add(BetweenFactor<Pose2>(3, 4, Pose2(2, 0, -M_PI_2), model));
+  graph.add(BetweenFactor<Pose2>(4, 5, Pose2(2, 0, -M_PI_2), model));
+
+  // Add the loop closure constraint
+  graph.add(BetweenFactor<Pose2>(5, 2, Pose2(2, 0, -M_PI_2), model));
+
+  // Create the initial estimate to the solution
+  // Initialize all poses as the same pose
+  Values initialEstimates;
+  for (int i = 1; i <= 5; ++i) {
+      initialEstimates.insert(i, Pose2(0.5 * i, 0, -M_PI_2 * (i-1) / 2));
+  }
+
+  // Optimize the graph using Levenberg-Marquardt optimization
+  LevenbergMarquardtOptimizer optimizer(graph, initialEstimates);
+  Values result = optimizer.optimize();
+
+  // Print out the optimized poses
+  for (int i = 1; i <= 5; ++i) {
+      Pose2 pose = result.at<Pose2>(i);
+      std::cout << "Optimized Pose " << i << ": x = " << pose.x() << ", y = " << pose.y() << ", theta = " << pose.theta() << std::endl;
+  }
+
+
   static double t_last = 0;
   if (GetMonotonicTime() - t_last < 0.5) {
     // Rate-limit visualization.
