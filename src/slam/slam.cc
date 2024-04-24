@@ -55,7 +55,9 @@ using std::vector;
 using vector_map::VectorMap;
 
 
-DEFINE_double()
+DEFINE_double(slam_min_range, 0.1, "Minimum range to keep a laser reading.");
+DEFINE_double(slam_max_range, 10.0, "Maximum range to keep a laser reading.");
+
 namespace slam {
 
 SLAM::SLAM() :
@@ -84,21 +86,18 @@ void SLAM::ObserveLaser(const vector<float>& ranges,
     float angle_increment = (angle_max - angle_min) / (num_ranges - 1);
 
     // Convert range and angle to Cartesian coordinates
-    for (size_t i = 0; i < num_ranges; i++) {
-        float range = ranges[i];
-        if (range >= personal_range_min && range <= personal_range_max) {
-
-        float angle = angle_min + i * angle_increment;
-        Eigen::Vector2f point;
-        point = Eigen::Vector2f(range*cos(angle), range*sin(angle))
-    
-        point_cloud.push_back(point); // Add point to the cloud
-        }
-        
-    }
-}
-
-
+    for (size_t i = 0; i < num_ranges; i++)
+    {
+      float range = ranges[i];
+      (if range < FLAG_slam_min_range || range > FLAG_slam_max_range)
+        continue;
+      float angle = angle_min + i * angle_increment;
+      Eigen::Vector2f point;
+      point = Eigen::Vector2f(range*cos(angle), range*sin(angle))
+      point_cloud.push_back(point); // Add point to the cloud
+      printf("Point: %f, %f\n", point.x(), point.y());
+    }  
+  }
 }
 
 void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
