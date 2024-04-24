@@ -60,8 +60,6 @@ SLAM::SLAM() :
     prev_odom_loc_(0, 0),
     prev_odom_angle_(0),
     odom_initialized_(false) {}
-    // float max_prob_pose_value = -1000000.0;
-    // int k = 0;
 
 
 void SLAM::GetPose(Eigen::Vector2f* loc, float* angle) const {
@@ -78,6 +76,8 @@ void SLAM::ObserveLaser(const vector<float>& ranges,
   // A new laser scan has been observed. Decide whether to add it as a pose
   // for SLAM. If decided to add, align it to the scan from the last saved pose,
   // and save both the scan and the optimized pose.
+
+  
 }
 
 void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
@@ -88,22 +88,15 @@ void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
     return;
   }
 
-  // k = k+1;
-
-  // Eigen::Vector2f loc; 
-  // float angle;
-  // GetPose(&loc, &angle);
-  // printf("%f\n", angle);
-
   // float delta_odom_x = odom_loc.x() - prev_odom_loc_.x();
   // float delta_odom_y = odom_loc.y() - prev_odom_loc_.y();
   // float delta_odom_angle = odom_angle - prev_odom_angle_;
 
   ////// Motion Model //////////////////////
   // Parameters for creating Predicted Poses 
-  double startX = odom_loc.x();
-  double startY = odom_loc.y();
-  double startAngle = odom_angle;
+  double startX = prev_odom_loc_.x();
+  double startY = prev_odom_loc_.y();
+  double startAngle = prev_odom_angle_;
 
   int numStepsX = 10;
   int numStepsY = 10;
@@ -135,32 +128,39 @@ void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
   //   printf("pose = [x = %f, y = %f, theta = %f]\n", pose[0], pose[1], pose[2]);
   // }
 
-  float max_prob_pose_value = 1000000.0;
   Eigen::Vector3d max_prob_pose;
+  // printf("max_prob_pose_value = %f\n", max_prob_pose_value);
 
   // Parameters, figure out what these need to be
-  float sigma_x = 0.01;
-  float sigma_y = 0.01;
-  float sigma_theta = 0.01;
+  double sigma_x = 0.01;
+  double sigma_y = 0.01;
+  double sigma_theta = 0.01;
 
-  for (Eigen::Vector3d pose: predicted_poses)
-  {
-    float x = pow((pose[0] - odom_loc.x()),2) / (2*pow(sigma_x,2)); 
-    float y = pow((pose[1] - odom_loc.y()),2) / (2*pow(sigma_y,2)); 
-    float theta = pow((pose[2] - odom_angle),2) / (2*pow(sigma_theta,2));
-    float sum = x + y + theta;
-    printf("pose[0] = %f, odom_loc.x() = %f\n", pose[0], odom_loc.x());
-    printf("[x = %f, y = %f, theta = %f, sum = %f]\n", x, y, theta, sum);
+  double max_prob_pose_value = -1000000.0;
+  for (Eigen::Vector3d pose: predicted_poses) {
+    double x = -pow((pose[0] - odom_loc.x()),2) / (2*pow(sigma_x,2)); 
+    double y = -pow((pose[1] - odom_loc.y()),2) / (2*pow(sigma_y,2)); 
+    double theta = -pow((pose[2] - odom_angle),2) / (2*pow(sigma_theta,2));
+    double sum = x + y + theta;
+    // printf("pose[0] = %f, odom_loc.x() = %f\n", pose[0], odom_loc.x());
+    // printf("[x = %f, y = %f, theta = %f, sum = %f]\n", x, y, theta, sum);
+    // printf("[x = %f, y = %f, theta = %f, sum = %f]\n", pose[0], pose[1], pose[2], sum);
 
-    if (sum < max_prob_pose_value)
+
+
+    if (sum > max_prob_pose_value)
     {
-      printf("I made it in\n \n ");
+      // printf("I made it in \n\n");
       max_prob_pose_value = sum;
       max_prob_pose = Eigen::Vector3d(pose[0], pose[1], pose[2]);
+      // printf("sum = %f, max_prob_pose_value = %f\n\n", sum, max_prob_pose_value);
     }
-  }
+    // printf("max_prob_pose_value = %f\n", max_prob_pose_value);
 
-  printf("Max Pose: [x = %f, y = %f, theta = %f, Probability = %f]\n", max_prob_pose[0], max_prob_pose[1], max_prob_pose[2], max_prob_pose_value);
+  }
+    // printf("Max Pose: [x = %f, y = %f, theta = %f, Probability = %f]\n", max_prob_pose[0], max_prob_pose[1], max_prob_pose[2], max_prob_pose_value);
+    // printf("Current = %f, %f.   Prev = %f, %f\n", odom_loc.x(),odom_loc.y(), prev_odom_loc_.x(), prev_odom_loc_.y());
+
 
   prev_odom_loc_ = odom_loc;
   prev_odom_angle_ = odom_angle;
