@@ -54,6 +54,8 @@ using std::swap;
 using std::vector;
 using vector_map::VectorMap;
 
+
+DEFINE_double()
 namespace slam {
 
 SLAM::SLAM() :
@@ -77,7 +79,26 @@ void SLAM::ObserveLaser(const vector<float>& ranges,
   // for SLAM. If decided to add, align it to the scan from the last saved pose,
   // and save both the scan and the optimized pose.
 
-  
+    size_t num_ranges = ranges.size();
+
+    float angle_increment = (angle_max - angle_min) / (num_ranges - 1);
+
+    // Convert range and angle to Cartesian coordinates
+    for (size_t i = 0; i < num_ranges; i++) {
+        float range = ranges[i];
+        if (range >= personal_range_min && range <= personal_range_max) {
+
+        float angle = angle_min + i * angle_increment;
+        Eigen::Vector2f point;
+        point = Eigen::Vector2f(range*cos(angle), range*sin(angle))
+    
+        point_cloud.push_back(point); // Add point to the cloud
+        }
+        
+    }
+}
+
+
 }
 
 void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
