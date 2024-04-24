@@ -39,7 +39,7 @@
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/nonlinear/Values.h>
 
-using namespace gtsam;
+// using namespace gtsam;
 
 using namespace math_util;
 using Eigen::Affine2f;
@@ -84,21 +84,21 @@ void SLAM::ObserveLaser(const vector<float>& ranges,
     size_t num_ranges = ranges.size();
 
     float angle_increment = (angle_max - angle_min) / (num_ranges - 1);
-
+    vector<Eigen::Vector2f> point_cloud;
     // Convert range and angle to Cartesian coordinates
     for (size_t i = 0; i < num_ranges; i++)
     {
       float range = ranges[i];
-      (if range < FLAG_slam_min_range || range > FLAG_slam_max_range)
+      if (range < FLAGS_slam_min_range || range > FLAGS_slam_max_range)
         continue;
       float angle = angle_min + i * angle_increment;
       Eigen::Vector2f point;
-      point = Eigen::Vector2f(range*cos(angle), range*sin(angle))
+      point = Eigen::Vector2f(range*cos(angle), range*sin(angle));
       point_cloud.push_back(point); // Add point to the cloud
-      printf("Point: %f, %f\n", point.x(), point.y());
+      // printf("Point: %f, %f\n", point.x(), point.y());
     }  
   }
-}
+
 
 void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
   if (!odom_initialized_) {
