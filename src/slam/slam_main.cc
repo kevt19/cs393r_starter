@@ -140,7 +140,7 @@ void PublishMap() {
   const vector<Vector2f> map = slam_.GetMap();
   printf("Map: %lu points\n", map.size());
   for (const Vector2f& p : map) {
-    visualization::DrawPoint(p, 0xC0C0C0, vis_msg_);
+    visualization::DrawPoint(p, 0xFF0000, vis_msg_);
   }
   visualization_publisher_.publish(vis_msg_);
 }
