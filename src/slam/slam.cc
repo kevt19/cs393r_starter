@@ -124,25 +124,26 @@ void SLAM::BuildRasterizedMap(const VectorMap& map) {
         // Vector to store the Eigen vectors
     std::vector<Eigen::Vector3d> probabilities;
 
-    for (double x = start_x; x < FLAGS_numStepsMapPointX * FLAGS_incrementMapPointX; x += FLAGS_incrementMapPointX) {
-        for (double y = start_y; y < FLAGS_numStepsMapPointY * FLAGS_incrementMapPointY; y += FLAGS_incrementMapPointY) {
-              Eigen::Vector2d vec(x, y);
-              double logProbX = -pow((vec[0] - start_x),2) / (2*pow(FLAGS_rasterize_map_gaussian_sigma,2));
-              double logProbY = -pow((vec[1] - start_y),2) / (2*pow(FLAGS_rasterize_map_gaussian_sigma,2));
-              double logProb = logProbX + logProbY;
+    for (double x = start_x; x < FLAGS_numStepsMapPointX * FLAGS_incrementMapPointX; x += FLAGS_incrementMapPointX) 
+      {
+        for (double y = start_y; y < FLAGS_numStepsMapPointY * FLAGS_incrementMapPointY; y += FLAGS_incrementMapPointY) 
+          {
+            Eigen::Vector2d vec(x, y);
+            double logProbX = -pow((vec[0] - start_x),2) / (2*pow(FLAGS_rasterize_map_gaussian_sigma,2));
+            double logProbY = -pow((vec[1] - start_y),2) / (2*pow(FLAGS_rasterize_map_gaussian_sigma,2));
+            double logProb = logProbX + logProbY;
 
-              // get lookup value
-              int lookup_x = x / FLAGS_rasterize_resolution;
-              int lookup_y = y / FLAGS_rasterize_resolution;
-              // check if we already have a value and use max, otherwise just use the value
-              if (rasterized_map_.find(std::make_pair(lookup_x, lookup_y)) == rasterized_map_.end()) {
-                rasterized_map_[std::make_pair(lookup_x, lookup_y)] = logProb;
-              } else {
-                rasterized_map_[std::make_pair(lookup_x, lookup_y)] = std::max(rasterized_map_[std::make_pair(lookup_x, lookup_y)], logProb);
-              }
+            // get lookup value
+            int lookup_x = x / FLAGS_rasterize_resolution;
+            int lookup_y = y / FLAGS_rasterize_resolution;
+            // check if we already have a value and use max, otherwise just use the value
+            if (rasterized_map_.find(std::make_pair(lookup_x, lookup_y)) == rasterized_map_.end()) {
+              rasterized_map_[std::make_pair(lookup_x, lookup_y)] = logProb;
+            } else {
+              rasterized_map_[std::make_pair(lookup_x, lookup_y)] = std::max(rasterized_map_[std::make_pair(lookup_x, lookup_y)], logProb);
             }
-        }
-    }
+          }
+      }
   }
 }
 
