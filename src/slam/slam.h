@@ -67,6 +67,8 @@ class SLAM {
   Eigen::Vector2f prev_odom_loc_;
   float prev_odom_angle_;
   bool odom_initialized_;
+  std::map<std::pair<int,int>, float> rasterized_map_; 
+
 };
 }  // namespace slam
 

@@ -39,7 +39,7 @@
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/nonlinear/Values.h>
 
-// using namespace gtsam;
+using namespace gtsam;
 
 using namespace math_util;
 using Eigen::Affine2f;
@@ -57,6 +57,22 @@ using vector_map::VectorMap;
 
 DEFINE_double(slam_min_range, 0.1, "Minimum range to keep a laser reading.");
 DEFINE_double(slam_max_range, 10.0, "Maximum range to keep a laser reading.");
+DEFINE_double(rasterize_resolution, 0.05, "Resolution to rasterize the map to.");
+DEFINE_double(rasterize_map_gaussian_sigma, 0.1, "Sigma for rasterized map.");
+DEFINE_double(sigma_x, 0.01, "Sigma for x in motion model.");
+DEFINE_double(sigma_y, 0.01, "Sigma for y in motion model.");
+DEFINE_double(sigma_theta, 0.01, "Sigma for theta in motion model.");
+DEFINE_int32(numStepsX, 10, "Number of steps in x for motion model.");
+DEFINE_int32(numStepsY, 10, "Number of steps in y for motion model.");
+DEFINE_int32(numStepsAngle, 15, "Number of steps in angle for motion model.");
+DEFINE_double(incrementX, 0.01, "Increment in x for motion model.");
+DEFINE_double(incrementY, 0.01, "Increment in y for motion model.");
+DEFINE_double(incrementAngle, 0.01, "Increment in angle for motion model.");
+
+DEFINE_int32(numStepsMapPointX, 10, "Number of steps in x for map point.");
+DEFINE_int32(numStepsMapPointY, 10, "Number of steps in y for map point.");
+DEFINE_double(incrementMapPointX, 0.01, "Increment in x for map point.");
+DEFINE_double(incrementMapPointY, 0.01, "Increment in y for map point.");
 
 namespace slam {
 
@@ -72,6 +88,64 @@ void SLAM::GetPose(Eigen::Vector2f* loc, float* angle) const {
   *angle = 0;
 }
 
+void SLAM::BuildRasterizedMap(const VectorMap& map) {
+  // Rasterize the map into a grid map with log probabilities
+  // create points from the lines
+  vector<Eigen::Vector2f> points;
+  for (const vector_map::Line& line : map.lines) {
+    // find points between based on rasterize_resolution
+    Eigen::Vector2f p0 = line.p0;
+    Eigen::Vector2f p1 = line.p1;
+    float p0_x = p0.x();
+    float p0_y = p0.y();  // Parameters for creating Predicted Poses 
+  int FLAGS_numStepsX = 10;
+  int FLAGS_numStepsY = 10;
+  int FLAGS_numStepsAngle = 15;
+
+  double FLAGS_incrementX = 0.01;
+  double FLAGS_incrementY = 0.01;
+  double FLAGS_incrementAngle = 0.01;
+    float p1_x = p1.x();
+    float p1_y = p1.y();
+    
+    for (float p = p0_x; p < p1_x; p += FLAGS_rasterize_resolution) {
+      for (float q = p0_y; q < p1_y; q += FLAGS_rasterize_resolution) {
+        points.push_back(Eigen::Vector2f(p, q));
+      }
+    }
+  }
+
+  // iterate over points, compute log probs and lookup values for map
+  for (const Eigen::Vector2f& point : points) {
+    // build grid around x and y
+    float start_x = point.x();
+    float start_y = point.y();
+
+        // Vector to store the Eigen vectors
+    std::vector<Eigen::Vector3d> probabilities;
+
+    for (double x = start_x; x < FLAGS_numStepsMapPointX * FLAGS_incrementMapPointX; x += FLAGS_incrementMapPointX) {
+        for (double y = start_y; y < FLAGS_numStepsMapPointY * FLAGS_incrementMapPointY; y += FLAGS_incrementMapPointY) {
+              Eigen::Vector2d vec(x, y);
+              double logProbX = -pow((vec[0] - start_x),2) / (2*pow(FLAGS_rasterize_map_gaussian_sigma,2));
+              double logProbY = -pow((vec[1] - start_y),2) / (2*pow(FLAGS_rasterize_map_gaussian_sigma,2));
+              double logProb = logProbX + logProbY;
+
+              // get lookup value
+              int lookup_x = x / FLAGS_rasterize_resolution;
+              int lookup_y = y / FLAGS_rasterize_resolution;
+              // check if we already have a value and use max, otherwise just use the value
+              if (rasterized_map_.find(std::make_pair(lookup_x, lookup_y)) == rasterized_map_.end()) {
+                rasterized_map_[std::make_pair(lookup_x, lookup_y)] = logProb;
+              } else {
+                rasterized_map_[std::make_pair(lookup_x, lookup_y)] = std::max(rasterized_map_[std::make_pair(lookup_x, lookup_y)], logProb);
+              }
+            }
+        }
+    }
+  }
+}
+
 void SLAM::ObserveLaser(const vector<float>& ranges,
                         float range_min,
                         float range_max,
@@ -84,21 +158,20 @@ void SLAM::ObserveLaser(const vector<float>& ranges,
     size_t num_ranges = ranges.size();
 
     float angle_increment = (angle_max - angle_min) / (num_ranges - 1);
-    vector<Eigen::Vector2f> point_cloud;
+
     // Convert range and angle to Cartesian coordinates
     for (size_t i = 0; i < num_ranges; i++)
     {
       float range = ranges[i];
-      if (range < FLAGS_slam_min_range || range > FLAGS_slam_max_range)
+      if (range < FLAG_slam_min_range || range > FLAG_slam_max_range)
         continue;
       float angle = angle_min + i * angle_increment;
       Eigen::Vector2f point;
       point = Eigen::Vector2f(range*cos(angle), range*sin(angle));
       point_cloud.push_back(point); // Add point to the cloud
-      // printf("Point: %f, %f\n", point.x(), point.y());
+      printf("Point: %f, %f\n", point.x(), point.y());
     }  
   }
-
 
 void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
   if (!odom_initialized_) {
@@ -113,29 +186,16 @@ void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
   // float delta_odom_angle = odom_angle - prev_odom_angle_;
 
   ////// Motion Model //////////////////////
-  // Parameters for creating Predicted Poses 
   double startX = prev_odom_loc_.x();
   double startY = prev_odom_loc_.y();
   double startAngle = prev_odom_angle_;
 
-  int numStepsX = 10;
-  int numStepsY = 10;
-  int numStepsAngle = 15;
-
-  double incrementX = 0.01;
-  double incrementY = 0.01;
-  double incrementAngle = 0.01;
-
   // Vector to store the Eigen vectors
   std::vector<Eigen::Vector3d> predicted_poses;
 
-  for (int i = 0; i < numStepsX; ++i) {
-      double x = startX + i * incrementX;
-      for (int j = 0; j < numStepsY; ++j) {
-          double y = startY + j * incrementY;
-          for (int k = 0; k < numStepsAngle; ++k) {
-              double angle = startAngle + k * incrementAngle;
-
+  for (double x = startX; x < FLAGS_numSteps * FLAGS_incrementX; x += FLAGS_incrementX) {
+      for (double y = startY; y < FLAGS_numStepsY * FLAGS_incrementY; y += FLAGS_incrementY) {
+          for (double angle = startAngle; angle < FLAGS_numStepsAngle * FLAGS_incrementAngle; angle += FLAGS_incrementAngle) {
               // Create an Eigen vector and store the current predicted pose combination
               Eigen::Vector3d vec(x, y, angle);
               predicted_poses.push_back(vec);
@@ -151,16 +211,11 @@ void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
   Eigen::Vector3d max_prob_pose;
   // printf("max_prob_pose_value = %f\n", max_prob_pose_value);
 
-  // Parameters, figure out what these need to be
-  double sigma_x = 0.01;
-  double sigma_y = 0.01;
-  double sigma_theta = 0.01;
-
   double max_prob_pose_value = -1000000.0;
   for (Eigen::Vector3d pose: predicted_poses) {
-    double x = -pow((pose[0] - odom_loc.x()),2) / (2*pow(sigma_x,2)); 
-    double y = -pow((pose[1] - odom_loc.y()),2) / (2*pow(sigma_y,2)); 
-    double theta = -pow((pose[2] - odom_angle),2) / (2*pow(sigma_theta,2));
+    double x = -pow((pose[0] - odom_loc.x()),2) / (2*pow(FLAGS_sigma_x,2)); 
+    double y = -pow((pose[1] - odom_loc.y()),2) / (2*pow(FLAGS_sigma_y,2)); 
+    double theta = -pow((pose[2] - odom_angle),2) / (2*pow(FLAGS_sigma_theta,2));
     double sum = x + y + theta;
     // printf("pose[0] = %f, odom_loc.x() = %f\n", pose[0], odom_loc.x());
     // printf("[x = %f, y = %f, theta = %f, sum = %f]\n", x, y, theta, sum);
