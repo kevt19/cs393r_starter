@@ -444,6 +444,9 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
       double prec_angle = prev_odom_angle_;
       Eigen::Vector3d previous_pose = Eigen::Vector3d(prev_loc_x, prev_loc_y, prec_angle);
       optimizedPoses_.push_back(previous_pose);
+      high_res_raster_maps_.push_back(BuildHighResRasterMapFromPoints(point_cloud));
+      low_res_raster_maps_.push_back(BuildLowResRasterMapFromHighRes(high_res_raster_maps_[0]));
+      optimizedPosesVariances_.push_back(0.0d);
       return;
     }
 
