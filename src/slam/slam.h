@@ -55,8 +55,11 @@ class SLAM {
   void ObserveOdometry(const Eigen::Vector2f& odom_loc,
                        const float odom_angle);
 
+
   // Get latest map.
   std::vector<Eigen::Vector2f> GetMap();
+  void BuildRasterMapsFromPoints(const vector<Eigen::Vector2f> &points);
+  void BuildRasterMapsFromMap(const std::vector<Eigen::Vector2f> &map);
 
   // Get latest robot pose.
   void GetPose(Eigen::Vector2f* loc, float* angle) const;
@@ -65,10 +68,13 @@ class SLAM {
 
   // Previous odometry-reported locations.
   Eigen::Vector2f prev_odom_loc_;
+  bool readyToSlam_;
   float prev_odom_angle_;
   bool odom_initialized_;
-  std::map<std::pair<int,int>, float> rasterized_map_; 
-
+  std::map<std::pair<int,int>, float> high_res_raster_map_;
+  std::map<std::pair<int,int>, float> low_res_raster_map_;
+  std::vector<std::vector<Eigen::Vector2d>> alignedPointsOverPoses_;
+  std::vector<Eigen::Vector2d> optimizedPoses_;
 };
 }  // namespace slam
 
