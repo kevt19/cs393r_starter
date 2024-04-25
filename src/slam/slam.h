@@ -59,11 +59,11 @@ class SLAM {
   void ObserveOdometry(const Eigen::Vector2d& odom_loc,
                        const double odom_angle);
 
-
   // Get latest map.
   std::vector<Eigen::Vector2f> GetMap();
-  void BuildRasterMapsFromPoints(const std::vector<Eigen::Vector2d> &points);
-  void BuildRasterMapsFromMap(const VectorMap& map);
+  std::map<std::pair<int,int>, double> BuildLowResRasterMapFromHighRes(std::map<std::pair<int,int>, double> high_res_raster_map); 
+  std::map<std::pair<int,int>, double> BuildHighResRasterMapFromPoints(const std::vector<Eigen::Vector2d> &points);
+  std::map<std::pair<int,int>, double> BuildHighResRasterMapFromMap(const VectorMap& map);
   std::vector<Eigen::Vector2d> AlignedPointCloud(const std::vector<Eigen::Vector2d>& point_cloud,
                                   const Eigen::Vector2d& optimized_loc,
                                   const double optimized_angle);
@@ -74,7 +74,9 @@ class SLAM {
                                    const Eigen::Vector2d& odom_loc, 
                                    const double odom_angle,
                                    const Eigen::Vector2d& prev_loc,
-                                   const double prev_angle);
+                                   const double prev_angle,
+                                   std::map<std::pair<int,int>, double> low_res_raster_map,
+                                   std::map<std::pair<int,int>, double> high_res_raster_map);
 
   // Get latest robot pose.
   void GetPose(Eigen::Vector2d* loc, double* angle) const;
@@ -82,11 +84,11 @@ class SLAM {
  private:
   // Previous odometry-reported locations.
   Eigen::Vector2d prev_odom_loc_;
-  bool readyToSlam_;
+  bool ready_to_csm_;
   double prev_odom_angle_;
   bool odom_initialized_;
-  std::map<std::pair<int,int>, double> high_res_raster_map_;
-  std::map<std::pair<int,int>, double> low_res_raster_map_;
+  std::vector<std::map<std::pair<int,int>, double>> high_res_raster_maps_;
+  std::vector<std::map<std::pair<int,int>, double>> low_res_raster_maps_;
   std::vector<std::vector<Eigen::Vector2d>> alignedPointsOverPoses_;
   std::vector<Eigen::Vector3d> optimizedPoses_;
 };

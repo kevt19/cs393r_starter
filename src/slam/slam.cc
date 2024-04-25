@@ -89,7 +89,7 @@ namespace slam
   {
     prev_odom_loc_ = Eigen::Vector2d(0.0d, 0.0d);
     prev_odom_angle_ = 0.0d;
-    readyToSlam_ = false;
+    ready_to_csm_ = false;
     odom_initialized_ = false;
   }
 
@@ -100,8 +100,32 @@ void SLAM::GetPose(Eigen::Vector2d* loc, double* angle) const {
   *angle = 0.0f;
 }
 
-void SLAM::BuildRasterMapsFromPoints(const vector<Eigen::Vector2d> &points)
+std::map<std::pair<int,int>, double> SLAM::BuildLowResRasterMapFromHighRes(std::map<std::pair<int,int>, double> high_res_raster_map) 
 {
+  std::map<std::pair<int,int>, double> low_res_raster_map;
+  // build low res map
+  // max pool the high res map
+  for (const auto& entry : high_res_raster_map) 
+  {
+    int x = entry.first.first;
+    int y = entry.first.second;
+    double log_prob = entry.second;
+    double ratio = FLAGS_raster_high_resolution / FLAGS_raster_low_resolution;
+    int low_res_lookup_x = x * ratio;
+    int low_res_lookup_y = y * ratio;
+    if (low_res_raster_map.find(std::make_pair(low_res_lookup_x, low_res_lookup_y)) == low_res_raster_map.end()) {
+      low_res_raster_map[std::make_pair(low_res_lookup_x, low_res_lookup_y)] = log_prob;
+    } else {
+      low_res_raster_map[std::make_pair(low_res_lookup_x, low_res_lookup_y)] = std::max(low_res_raster_map[std::make_pair(low_res_lookup_x, low_res_lookup_y)], log_prob);
+    }
+  }
+  return low_res_raster_map;
+}
+
+
+std::map<std::pair<int,int>, double> SLAM::BuildHighResRasterMapFromPoints(const std::vector<Eigen::Vector2d> &points)
+{
+  std::map<std::pair<int,int>, double> high_res_raster_map;
   // iterate over points, compute log probs and lookup values for map
   for (const Eigen::Vector2d& point : points) 
   {
@@ -125,34 +149,18 @@ void SLAM::BuildRasterMapsFromPoints(const vector<Eigen::Vector2d> &points)
             int lookup_x = x / FLAGS_raster_high_resolution;
             int lookup_y = y / FLAGS_raster_high_resolution;
             // check if we already have a value and use max, otherwise just use the value
-            if (high_res_raster_map_.find(std::make_pair(lookup_x, lookup_y)) == high_res_raster_map_.end()) {
-              high_res_raster_map_[std::make_pair(lookup_x, lookup_y)] = logProb;
+            if (high_res_raster_map.find(std::make_pair(lookup_x, lookup_y)) == high_res_raster_map.end()) {
+              high_res_raster_map[std::make_pair(lookup_x, lookup_y)] = logProb;
             } else {
-              high_res_raster_map_[std::make_pair(lookup_x, lookup_y)] = std::max(high_res_raster_map_[std::make_pair(lookup_x, lookup_y)], logProb);
+              high_res_raster_map[std::make_pair(lookup_x, lookup_y)] = std::max(high_res_raster_map[std::make_pair(lookup_x, lookup_y)], logProb);
             }
           }
       }
   }
-
-  // build low res map
-  // max pool the high res map
-  for (const auto& entry : high_res_raster_map_) 
-  {
-    int x = entry.first.first;
-    int y = entry.first.second;
-    double log_prob = entry.second;
-    double ratio = FLAGS_raster_high_resolution / FLAGS_raster_low_resolution;
-    int low_res_lookup_x = x * ratio;
-    int low_res_lookup_y = y * ratio;
-    if (low_res_raster_map_.find(std::make_pair(low_res_lookup_x, low_res_lookup_y)) == low_res_raster_map_.end()) {
-      low_res_raster_map_[std::make_pair(low_res_lookup_x, low_res_lookup_y)] = log_prob;
-    } else {
-      low_res_raster_map_[std::make_pair(low_res_lookup_x, low_res_lookup_y)] = std::max(low_res_raster_map_[std::make_pair(low_res_lookup_x, low_res_lookup_y)], log_prob);
-    }
-  }
+  return high_res_raster_map;
 }
 
-void SLAM::BuildRasterMapsFromMap(const VectorMap& map) {
+std::map<std::pair<int,int>, double> SLAM::BuildHighResRasterMapFromMap(const VectorMap& map) {
   // Rasterize the map into a grid map with log probabilities
   // create points from the lines
   std::vector<Eigen::Vector2d> points;
@@ -178,7 +186,7 @@ void SLAM::BuildRasterMapsFromMap(const VectorMap& map) {
       }
     }
   }
-  BuildRasterMapsFromPoints(points);
+  return BuildHighResRasterMapFromPoints(points);
 }
 
 vector<Eigen::Vector2d> SLAM::AlignedPointCloud(const vector<Eigen::Vector2d>& point_cloud,
@@ -208,8 +216,10 @@ Eigen::Vector3d SLAM::CorrelativeScanMatching(const vector<Eigen::Vector2d>& poi
   {
     Eigen::Vector2d prev_loc = Eigen::Vector2d(optimizedPoses_[i].x(), optimizedPoses_[i].y());
     double prev_angle = optimizedPoses_[i].z();
-    BuildRasterMapsFromPoints(alignedPointsOverPoses_[i]); // we can optimize this by also storing map in a vector
-    Eigen::Vector3d bestPose = SingleCorrelativeScanMatching(point_cloud, odom_loc, odom_angle, prev_loc, prev_angle);
+    std::map<std::pair<int,int>, double> high_res_raster_map = high_res_raster_maps_[i];
+    std::map<std::pair<int,int>, double> low_res_raster_map = low_res_raster_maps_[i];
+
+    Eigen::Vector3d bestPose = SingleCorrelativeScanMatching(point_cloud, odom_loc, odom_angle, prev_loc, prev_angle, low_res_raster_map, high_res_raster_map);
     bestPoseCounter += bestPose;
     n_iters += 1.0;
   }
@@ -226,7 +236,9 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
                                    const Vector2d& odom_loc, 
                                    const double odom_angle,
                                    const Eigen::Vector2d& prev_loc,
-                                   const double prev_angle) {
+                                   const double prev_angle,
+                                   std::map<std::pair<int,int>, double> low_res_raster_map,
+                                   std::map<std::pair<int,int>, double> high_res_raster_map) {
   // Implement correlative scan matching to find the best pose given the
   // previous pose and the current laser scan.
 
@@ -278,8 +290,8 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
           double map_y = y + r_point.y();
           int lookup_x = map_x / FLAGS_raster_low_resolution;
           int lookup_y = map_y / FLAGS_raster_low_resolution;
-          if (low_res_raster_map_.find(std::make_pair(lookup_x, lookup_y)) != low_res_raster_map_.end()) {
-            log_prob_map += low_res_raster_map_[std::make_pair(lookup_x, lookup_y)];
+          if (low_res_raster_map.find(std::make_pair(lookup_x, lookup_y)) != low_res_raster_map.end()) {
+            log_prob_map += low_res_raster_map[std::make_pair(lookup_x, lookup_y)];
           }
         }
 
@@ -346,8 +358,8 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
           double map_y = y + r_point.y();
           int lookup_x = map_x / FLAGS_raster_high_resolution;
           int lookup_y = map_y / FLAGS_raster_high_resolution;
-          if (high_res_raster_map_.find(std::make_pair(lookup_x, lookup_y)) != high_res_raster_map_.end()) {
-            high_res_log_prob_map += high_res_raster_map_[std::make_pair(lookup_x, lookup_y)];
+          if (high_res_raster_map.find(std::make_pair(lookup_x, lookup_y)) != high_res_raster_map.end()) {
+            high_res_log_prob_map += high_res_raster_map[std::make_pair(lookup_x, lookup_y)];
           }
         }
 
@@ -386,7 +398,6 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
       Eigen::Vector2d point;
       point = Eigen::Vector2d(range*cos(angle), range*sin(angle));
       point_cloud.push_back(point); // Add point to the cloud
-      // printf("Point: %f, %f\n", point.x(), point.y());
     }
     
     // if this is the first scan, let's save it and return
@@ -401,7 +412,7 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
       return;
     }
 
-    if (!readyToSlam_) {
+    if (!ready_to_csm_) {
       return;
     }
 
@@ -410,13 +421,23 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
     Eigen::Vector2d optimized_loc = Eigen::Vector2d(optimized_pose.x(), optimized_pose.y());  
     double optimized_angle = optimized_pose.z();
     // update point cloud
-    vector<Eigen::Vector2d> aligned_point_cloud = AlignedPointCloud(point_cloud, optimized_loc, optimized_angle);
+    std::vector<Eigen::Vector2d> aligned_point_cloud = AlignedPointCloud(point_cloud, optimized_loc, optimized_angle);
+    std::map<std::pair<int,int>, double> high_res_raster_map = BuildHighResRasterMapFromPoints(aligned_point_cloud);
+    std::map<std::pair<int,int>, double> low_res_raster_map = BuildLowResRasterMapFromHighRes(high_res_raster_map);
+
+    // if we have too many poses, remove the oldest one
+    if (num_scans >= FLAGS_slam_num_poses) {
+      alignedPointsOverPoses_.erase(alignedPointsOverPoses_.begin());
+      optimizedPoses_.erase(optimizedPoses_.begin());
+      high_res_raster_maps_.erase(high_res_raster_maps_.begin());
+      low_res_raster_maps_.erase(low_res_raster_maps_.begin());
+    }
+
     alignedPointsOverPoses_.push_back(aligned_point_cloud);
     optimizedPoses_.push_back(optimized_pose);
-
-    // TODO: need to run pose graph optimization and set this to false.
-    // maybe within main? Otherwise need a function nearby..
-    readyToSlam_ = false; 
+    high_res_raster_maps_.push_back(high_res_raster_map);
+    low_res_raster_maps_.push_back(low_res_raster_map);
+    ready_to_csm_ = false; 
   }
 
 void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
@@ -435,7 +456,8 @@ void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
     return;
   }
 
-  readyToSlam_ = true;
+  // otherwise we have deviated enough
+  ready_to_csm_ = true;
   prev_odom_loc_ = odom_loc;
   prev_odom_angle_ = odom_angle;
 }
@@ -444,6 +466,35 @@ vector<Vector2f> SLAM::GetMap() {
   vector<Vector2f> map;
   // Reconstruct the map as a single aligned point cloud from all saved poses
   // and their respective scans.
+
+  // convert w.r.t first pose
+  int num_scans = alignedPointsOverPoses_.size();
+  if (num_scans == 0) {
+    return map;
+  }
+  Eigen::Vector3d first_pose = optimizedPoses_[0];
+  Eigen::Vector2d first_loc = Eigen::Vector2d(first_pose.x(), first_pose.y());
+  double first_angle = first_pose.z();
+
+  for (int i = 0; i < num_scans; i++) {
+
+    Eigen::Vector3d pose = optimizedPoses_[i];
+    Eigen::Vector2d loc = Eigen::Vector2d(pose.x(), pose.y());
+    double angle = pose.z();
+
+    double delta_x = loc.x() - first_loc.x();
+    double delta_y = loc.y() - first_loc.y();
+    double delta_angle = angle - first_angle;
+
+    vector<Eigen::Vector2d> aligned_point_cloud = alignedPointsOverPoses_[i];
+    for (const Eigen::Vector2d& point : aligned_point_cloud) {
+      double x = point.x();
+      double y = point.y();
+      double rotated_x = x * cos(delta_angle) - y * sin(delta_angle);
+      double rotated_y = x * sin(delta_angle) + y * cos(delta_angle);
+      map.push_back(Vector2f(rotated_x + delta_x, rotated_y + delta_y));
+    }
+  }
   return map;
 }
 }  // namespace slam
