@@ -342,7 +342,7 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
     if (log_prob < bestLogProb) {
       // add best cov to what we send back
       // get diagonal i of covariance matrix
-      double bestCov = CovPoses.diagonal()[bestIdx];
+      double bestCov = CovPoses(bestIdx, bestIdx);
       Eigen::Vector4d bestPoseWithVar = Eigen::Vector4d(bestPose.x(), bestPose.y(), bestPose.z(), bestCov);
       return bestPoseWithVar; // this only happens if the best is the very last one
     }
@@ -404,7 +404,7 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
     }
   }
   // add best cov to what we send back
-    double bestCov = CovPoses.diagonal()[bestIdx];
+    double bestCov = CovPoses(bestIdx, bestIdx);
     Eigen::Vector4d bestPoseWithVar = Eigen::Vector4d(bestPose.x(), bestPose.y(), bestPose.z(), bestCov);
     return bestPoseWithVar;
 }
@@ -437,8 +437,7 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
     
     // if this is the first scan, let's save it and return
     int num_scans = alignedPointsOverPoses_.size();
-    if (num_scans == 0) {
-      alignedPointsOverPoses_.push_back(point_cloud);
+    if (ready_to_csm_ && num_scans == 0) {
       double prev_loc_x = prev_odom_loc_.x();
       double prev_loc_y = prev_odom_loc_.y();
       double prec_angle = prev_odom_angle_;
@@ -446,8 +445,9 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
       optimizedPoses_.push_back(previous_pose);
       high_res_raster_maps_.push_back(BuildHighResRasterMapFromPoints(point_cloud));
       low_res_raster_maps_.push_back(BuildLowResRasterMapFromHighRes(high_res_raster_maps_[0]));
-      optimizedPosesVariances_.push_back(0.0d);
       alignedPointsOverPoses_.push_back(point_cloud);
+      optimizedPosesVariances_.push_back(0.0d);
+      ready_to_csm_ = false; 
       return;
     }
 
@@ -488,6 +488,7 @@ void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
     prev_odom_angle_ = odom_angle;
     prev_odom_loc_ = odom_loc;    
     odom_initialized_ = true;
+    ready_to_csm_ = true;
     return;
   }
 
