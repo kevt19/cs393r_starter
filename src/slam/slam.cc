@@ -447,6 +447,7 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
       high_res_raster_maps_.push_back(BuildHighResRasterMapFromPoints(point_cloud));
       low_res_raster_maps_.push_back(BuildLowResRasterMapFromHighRes(high_res_raster_maps_[0]));
       optimizedPosesVariances_.push_back(0.0d);
+      alignedPointsOverPoses_.push_back(point_cloud);
       return;
     }
 
