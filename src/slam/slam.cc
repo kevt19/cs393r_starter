@@ -56,10 +56,13 @@ using std::vector;
 using vector_map::VectorMap;
 
 DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
-DEFINE_double(slam_angle_threshold, 30, "Angle threshold for SLAM."); // in deg
+DEFINE_double(slam_angle_threshold, 30, "Angle threshold for SLAM."); // in deg, need to check for consistency
 
 DEFINE_double(slam_min_range, 0.1, "Minimum range to keep a laser reading.");
 DEFINE_double(slam_max_range, 10.0, "Maximum range to keep a laser reading.");
+
+DEFINE_int32(slam_num_poses, 10, "Number of poses to keep for SLAM Pose Graph optimization.");
+DEFINE_int32(scan_match_timesteps, 1, "Number of previous poses / scans to optimize current pose for.");
 
 DEFINE_double(raster_high_resolution, 0.05, "Resolution to rasterize the map to.");
 DEFINE_double(raster_low_resolution, 0.5, "Resolution to rasterize the map to.");
@@ -70,9 +73,9 @@ DEFINE_double(sigma_y, 0.01, "Sigma for y in motion model.");
 DEFINE_double(sigma_theta, 0.01, "Sigma for theta in motion model.");
 
 DEFINE_double(incrementAngle, 0.01, "Increment in angle for motion model.");
+DEFINE_double(VoxelAngleSize, 45.0, "Maximum size to consider for angle away.");
 
 DEFINE_double(VoxelDistSize, 0.75, "Maximum size to consider for distance away."); // likely correlated with slam_dist_threshold
-DEFINE_double(VoxelAngleSize, 45.0, "Maximum size to consider for angle away.");
 
 DEFINE_double(maxMapDistance, 1.0, "Maximum distance to consider for log probabilities for map point.");
 
@@ -183,6 +186,32 @@ vector<Eigen::Vector2f>& SLAM::AlignedPointCloud(const vector<Eigen::Vector2f>& 
 }
 
 Eigen::Vector3d SLAM::CorrelativeScanMatching(const vector<Eigen::Vector2f>& point_cloud,
+                                   const Vector2f& odom_loc, 
+                                   const float odom_angle) 
+{
+  // get previous pose and loop backwards through all previous poses
+  Eigen::Vector3d bestPoseCounter = Eigen::Vector3d(0, 0, 0);
+  int min_i = std::max(0, (int) optimizedPoses_.size() - FLAGS_scan_match_timesteps);
+  double n_iters = 0.0;
+  for (int i = optimizedPoses_.size() - 1; i >= min_i; i--) 
+  {
+    Eigen::Vector2d prev_loc = Eigen::Vector2d(optimizedPoses_[i].x(), optimizedPoses_[i].y());
+    float prev_angle = optimizedPoses_[i].z();
+    BuildRasterMapsFromPoints(alignedPointsOverPoses_[i]); // we can optimize this by also storing map in a vector
+    Eigen::Vector3d bestPose = SingleCorrelativeScanMatching(point_cloud, odom_loc, odom_angle, prev_loc, prev_angle);
+    bestPoseCounter += bestPose;
+    n_iters += 1.0;
+  }
+
+  if (n_iters == 0) {
+    return Eigen::Vector3d(0, 0, 0); // this should never happen, probably better to create an exception here
+  }
+
+  return bestPoseCounter / n_iters;
+}
+
+
+Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2f>& point_cloud,
                                    const Vector2f& odom_loc, 
                                    const float odom_angle,
                                    const Eigen::Vector2f& prev_loc,
@@ -352,7 +381,8 @@ Eigen::Vector3d SLAM::CorrelativeScanMatching(const vector<Eigen::Vector2f>& poi
     int num_scans = alignedPointsOverPoses_.size();
     if (num_scans == 0) {
       alignedPointsOverPoses_.push_back(point_cloud);
-      optimizedPoses_.push_back(prev_odom_loc_);
+      Eigen::Vector3d previous_pose = Eigen::Vector3d(prev_odom_loc_.x(), prev_odom_loc_.y(), prev_odom_angle_);
+      optimizedPoses_.push_back(previous_pose);
       return;
     }
 
@@ -367,7 +397,7 @@ Eigen::Vector3d SLAM::CorrelativeScanMatching(const vector<Eigen::Vector2f>& poi
     // update point cloud
     vector<Eigen::Vector2d> aligned_point_cloud = AlignedPointCloud(point_cloud, prev_odom_loc_, prev_odom_angle_, optimized_loc, optimized_angle);
     alignedPointsOverPoses_.push_back(aligned_point_cloud);
-    optimizedPoses_.push_back(optimized_loc);
+    optimizedPoses_.push_back(optimized_pose);
 
     // TODO: need to run pose graph optimization and set this to false.
     // maybe within main? Otherwise need a function nearby..
@@ -395,10 +425,10 @@ void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
   prev_odom_angle_ = odom_angle;
 }
 
-vector<Vector2f> SLAM::GetMap() {
-  vector<Vector2f> map;
-  // Reconstruct the map as a single aligned point cloud from all saved poses
-  // and their respective scans.
-  return map;
-}
+  vector<Vector2f> SLAM::GetMap() {
+    vector<Vector2f> map;
+    // Reconstruct the map as a single aligned point cloud from all saved poses
+    // and their respective scans.
+    return map;
+  }
 }  // namespace slam

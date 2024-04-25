@@ -74,7 +74,7 @@ class SLAM {
   std::map<std::pair<int,int>, float> high_res_raster_map_;
   std::map<std::pair<int,int>, float> low_res_raster_map_;
   std::vector<std::vector<Eigen::Vector2d>> alignedPointsOverPoses_;
-  std::vector<Eigen::Vector2d> optimizedPoses_;
+  std::vector<Eigen::Vector3d> optimizedPoses_;
 };
 }  // namespace slam
 
