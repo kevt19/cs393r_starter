@@ -48,6 +48,7 @@ using namespace math_util;
 using Eigen::Affine2f;
 using Eigen::Rotation2Df;
 using Eigen::Translation2f;
+using Eigen::Vector2d;
 using Eigen::Vector2f;
 using Eigen::Vector2i;
 using std::cout;
@@ -56,7 +57,6 @@ using std::string;
 using std::swap;
 using std::vector;
 using vector_map::VectorMap;
-using vector_map::Line;
 
 DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30, "Angle threshold for SLAM."); // in deg, need to check for consistency
@@ -84,28 +84,30 @@ DEFINE_double(maxMapDistance, 1.0, "Maximum distance to consider for log probabi
 
 namespace slam 
 {
+  // constructor
+  SLAM::SLAM() 
+  {
+    prev_odom_loc_ = Eigen::Vector2d(0.0d, 0.0d);
+    prev_odom_angle_ = 0.0d;
+    readyToSlam_ = false;
+    odom_initialized_ = false;
+  }
 
-  SLAM::SLAM() :
-      prev_odom_loc_(0, 0),
-      prev_odom_angle_(0),
-      readyToSlam_(false),
-      odom_initialized_(false) {}
 
-
-void SLAM::GetPose(Eigen::Vector2f* loc, float* angle) const {
+void SLAM::GetPose(Eigen::Vector2d* loc, double* angle) const {
   // Return the latest pose estimate of the robot.
-  *loc = Vector2f(0, 0);
-  *angle = 0;
+  *loc = Vector2d(0.0d, 0.0d);
+  *angle = 0.0f;
 }
 
-void SLAM::BuildRasterMapsFromPoints(const vector<Eigen::Vector2f> &points)
+void SLAM::BuildRasterMapsFromPoints(const vector<Eigen::Vector2d> &points)
 {
   // iterate over points, compute log probs and lookup values for map
-  for (const Eigen::Vector2f& point : points) 
+  for (const Eigen::Vector2d& point : points) 
   {
     // build grid around x and y
-    float start_x = point.x();
-    float start_y = point.y();
+    double start_x = point.x();
+    double start_y = point.y();
 
     // Vector to store the Eigen vectors
     std::vector<Eigen::Vector3d> probabilities;
@@ -139,8 +141,9 @@ void SLAM::BuildRasterMapsFromPoints(const vector<Eigen::Vector2f> &points)
     int x = entry.first.first;
     int y = entry.first.second;
     double log_prob = entry.second;
-    int low_res_lookup_x = x * FLAGS_raster_high_resolution / FLAGS_raster_low_resolution;
-    int low_res_lookup_y = y * FLAGS_raster_high_resolution / FLAGS_raster_low_resolution;
+    double ratio = FLAGS_raster_high_resolution / FLAGS_raster_low_resolution;
+    int low_res_lookup_x = x * ratio;
+    int low_res_lookup_y = y * ratio;
     if (low_res_raster_map_.find(std::make_pair(low_res_lookup_x, low_res_lookup_y)) == low_res_raster_map_.end()) {
       low_res_raster_map_[std::make_pair(low_res_lookup_x, low_res_lookup_y)] = log_prob;
     } else {
@@ -152,47 +155,53 @@ void SLAM::BuildRasterMapsFromPoints(const vector<Eigen::Vector2f> &points)
 void SLAM::BuildRasterMapsFromMap(const VectorMap& map) {
   // Rasterize the map into a grid map with log probabilities
   // create points from the lines
-  std::vector<Eigen::Vector2f> points;
-  for (const Line& line : map.lines)
+  std::vector<Eigen::Vector2d> points;
+
+  vector<geometry::line2f> all_map_lines;
+  float max_map_range = 10000.0;
+  Eigen::Vector2f loc = Eigen::Vector2f(0.0f, 0.0f);
+  map.GetSceneLines(loc, max_map_range, &all_map_lines);
+  int all_map_lines_size = all_map_lines.size();
+
+  for (int i = 0; i < all_map_lines_size; i++)
   {
-    // find points between based on rasterize_resolution
-    Eigen::Vector2f p0 = line.p0;
-    Eigen::Vector2f p1 = line.p1;
+    Eigen::Vector2f p0 = all_map_lines[i].p0;
+    Eigen::Vector2f p1 = all_map_lines[i].p1;
     double p0_x = p0.x();
     double p0_y = p0.y();
     double p1_x = p1.x();
     double p1_y = p1.y();
     
     for (double p = p0_x; p < p1_x; p += FLAGS_raster_high_resolution) {
-      for (double q = p0_y; q < p1_y; q += FLAGS_rasterize_high_resolution) {
-        points.push_back(Eigen::Vector2f(p, q));
+      for (double q = p0_y; q < p1_y; q += FLAGS_raster_high_resolution) {
+        points.push_back(Eigen::Vector2d(p, q));
       }
     }
   }
   BuildRasterMapsFromPoints(points);
 }
 
-vector<Eigen::Vector2f> SLAM::AlignedPointCloud(const vector<Eigen::Vector2f>& point_cloud,
-                                  const Vector2f& optimized_loc,
-                                  const float optimized_angle) {
-  vector<Eigen::Vector2f> aligned_point_cloud;
-  for (const Eigen::Vector2f& point : point_cloud) 
+vector<Eigen::Vector2d> SLAM::AlignedPointCloud(const vector<Eigen::Vector2d>& point_cloud,
+                                  const Vector2d& optimized_loc,
+                                  const double optimized_angle) {
+  vector<Eigen::Vector2d> aligned_point_cloud;
+  for (const Eigen::Vector2d& point : point_cloud) 
   {
-    float point_x = point.x();
-    float point_y = point.y();
-    float rotated_x = point_x * cos(optimized_angle) - point_y * sin(optimized_angle);
-    float rotated_y = point_x * sin(optimized_angle) + point_y * cos(optimized_angle);
-    aligned_point_cloud.push_back(Eigen::Vector2f(rotated_x, rotated_y));
+    double point_x = point.x();
+    double point_y = point.y();
+    double rotated_x = point_x * cos(optimized_angle) - point_y * sin(optimized_angle);
+    double rotated_y = point_x * sin(optimized_angle) + point_y * cos(optimized_angle);
+    aligned_point_cloud.push_back(Eigen::Vector2d(rotated_x, rotated_y));
   }
   return aligned_point_cloud;
 }
 
-Eigen::Vector3d SLAM::CorrelativeScanMatching(const vector<Eigen::Vector2f>& point_cloud,
-                                   const Vector2f& odom_loc, 
-                                   const float odom_angle) 
+Eigen::Vector3d SLAM::CorrelativeScanMatching(const vector<Eigen::Vector2d>& point_cloud,
+                                   const Vector2d& odom_loc, 
+                                   const double odom_angle) 
 {
   // get previous pose and loop backwards through all previous poses
-  Eigen::Vector3d bestPoseCounter = Eigen::Vector3d(0, 0, 0);
+  Eigen::Vector3d bestPoseCounter = Eigen::Vector3d(0.0d, 0.0d, 0.0d);
   int min_i = std::max(0, (int) optimizedPoses_.size() - FLAGS_scan_match_timesteps);
   double n_iters = 0.0;
   for (int i = optimizedPoses_.size() - 1; i >= min_i; i--) 
@@ -206,18 +215,18 @@ Eigen::Vector3d SLAM::CorrelativeScanMatching(const vector<Eigen::Vector2f>& poi
   }
 
   if (n_iters == 0) {
-    return Eigen::Vector3d(0, 0, 0); // this should never happen, probably better to create an exception here
+    return Eigen::Vector3d(0.0d, 0.0d, 0.0d); // this should never happen, probably better to create an exception here
   }
 
   return bestPoseCounter / n_iters;
 }
 
 
-Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2f>& point_cloud,
-                                   const Vector2f& odom_loc, 
-                                   const float odom_angle,
-                                   const Eigen::Vector2f& prev_loc,
-                                   const float prev_angle) {
+Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d>& point_cloud,
+                                   const Vector2d& odom_loc, 
+                                   const double odom_angle,
+                                   const Eigen::Vector2d& prev_loc,
+                                   const double prev_angle) {
   // Implement correlative scan matching to find the best pose given the
   // previous pose and the current laser scan.
 
@@ -243,7 +252,7 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2f
 
     // rotated points optimized computation
     vector<Eigen::Vector2d> rotated_points;
-    for (const Eigen::Vector2f& point : point_cloud) 
+    for (const Eigen::Vector2d& point : point_cloud)
     {
       double point_x = point.x();
       double point_y = point.y();
@@ -263,7 +272,7 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2f
 
         // check low-res map
         double log_prob_map = 0;
-        for (const Eigen::Vector2f& r_point : rotated_points) 
+        for (const Eigen::Vector2d& r_point : rotated_points) 
         {
           double map_x = x + r_point.x();
           double map_y = y + r_point.y();
@@ -281,7 +290,8 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2f
   }
 
   double bestLogProb = -100000.0;
-  Eigen::Vector3d bestPose = Eigen::Vector3d(startX, startY, prev_angle);
+  double prev_angle_d = prev_angle;
+  Eigen::Vector3d bestPose = Eigen::Vector3d(startX, startY, prev_angle_d);
 
   // now do high res search with priority queue
   while (!bestLowResVoxels.Empty())
@@ -309,14 +319,14 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2f
     double log_prob_theta = -pow((angle - odom_angle), 2) / (2*pow(FLAGS_sigma_theta, 2));
 
     // rotated points optimized computation
-    vector<Eigen::Vector2f> rotated_points;
-    for (const Eigen::Vector2f& point : point_cloud) 
+    vector<Eigen::Vector2d> rotated_points;
+    for (const Eigen::Vector2d& point : point_cloud) 
     {
       double point_x = point.x();
       double point_y = point.y();
       double rotated_x = point_x * cos(angle) - point_y * sin(angle);
       double rotated_y = point_x * sin(angle) + point_y * cos(angle);
-      rotated_points.push_back(Eigen::Vector2f(rotated_x, rotated_y));
+      rotated_points.push_back(Eigen::Vector2d(rotated_x, rotated_y));
     }
 
     for (double x = minX; x <= maxX; x += FLAGS_raster_high_resolution) 
@@ -330,7 +340,7 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2f
 
         // check low-res map
         double high_res_log_prob_map = 0;
-        for (const Eigen::Vector2f& r_point : rotated_points) 
+        for (const Eigen::Vector2d& r_point : rotated_points) 
         {
           double map_x = x + r_point.x();
           double map_y = y + r_point.y();
@@ -363,18 +373,18 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2f
 
     size_t num_ranges = ranges.size();
 
-    float angle_increment = (angle_max - angle_min) / (num_ranges - 1);
-    std::vector<Eigen::Vector2f> point_cloud;
+    double angle_increment = (angle_max - angle_min) / (num_ranges - 1);
+    std::vector<Eigen::Vector2d> point_cloud;
 
     // Convert range and angle to Cartesian coordinates
     for (size_t i = 0; i < num_ranges; i++)
     {
-      float range = ranges[i];
+      double range = ranges[i];
       if (range < FLAGS_slam_min_range || range > FLAGS_slam_max_range)
         continue;
-      float angle = angle_min + i * angle_increment;
-      Eigen::Vector2f point;
-      point = Eigen::Vector2f(range*cos(angle), range*sin(angle));
+      double angle = angle_min + i * angle_increment;
+      Eigen::Vector2d point;
+      point = Eigen::Vector2d(range*cos(angle), range*sin(angle));
       point_cloud.push_back(point); // Add point to the cloud
       // printf("Point: %f, %f\n", point.x(), point.y());
     }
@@ -383,7 +393,10 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2f
     int num_scans = alignedPointsOverPoses_.size();
     if (num_scans == 0) {
       alignedPointsOverPoses_.push_back(point_cloud);
-      Eigen::Vector3d previous_pose = Eigen::Vector3d(prev_odom_loc_.x(), prev_odom_loc_.y(), prev_odom_angle_);
+      double prev_loc_x = prev_odom_loc_.x();
+      double prev_loc_y = prev_odom_loc_.y();
+      double prec_angle = prev_odom_angle_;
+      Eigen::Vector3d previous_pose = Eigen::Vector3d(prev_loc_x, prev_loc_y, prec_angle);
       optimizedPoses_.push_back(previous_pose);
       return;
     }
@@ -397,7 +410,7 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2f
     Eigen::Vector2d optimized_loc = Eigen::Vector2d(optimized_pose.x(), optimized_pose.y());  
     double optimized_angle = optimized_pose.z();
     // update point cloud
-    vector<Eigen::Vector2f> aligned_point_cloud = AlignedPointCloud(point_cloud, optimized_loc, optimized_angle);
+    vector<Eigen::Vector2d> aligned_point_cloud = AlignedPointCloud(point_cloud, optimized_loc, optimized_angle);
     alignedPointsOverPoses_.push_back(aligned_point_cloud);
     optimizedPoses_.push_back(optimized_pose);
 
@@ -406,7 +419,7 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2f
     readyToSlam_ = false; 
   }
 
-void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
+void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
   if (!odom_initialized_) {
     prev_odom_angle_ = odom_angle;
     prev_odom_loc_ = odom_loc;    
@@ -414,9 +427,9 @@ void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
     return;
   }
 
-  float delta_odom_x = odom_loc.x() - prev_odom_loc_.x();
-  float delta_odom_y = odom_loc.y() - prev_odom_loc_.y();
-  float delta_odom_angle = RadToDeg(odom_angle - prev_odom_angle_);
+  double delta_odom_x = odom_loc.x() - prev_odom_loc_.x();
+  double delta_odom_y = odom_loc.y() - prev_odom_loc_.y();
+  double delta_odom_angle = RadToDeg(odom_angle - prev_odom_angle_);
   double delta_odom_dist = sqrt(pow(delta_odom_x, 2) + pow(delta_odom_y, 2));
   if (delta_odom_dist < FLAGS_slam_dist_threshold && fabs(delta_odom_angle) < FLAGS_slam_angle_threshold) {
     return;

@@ -24,7 +24,7 @@
 
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
-
+#include <map>
 #include "vector_map/vector_map.h"
 
 // #include <gtsam/geometry/Pose2.h>
@@ -56,38 +56,38 @@ class SLAM {
                     float angle_max);
 
   // Observe new odometry-reported location.
-  void ObserveOdometry(const Eigen::Vector2f& odom_loc,
-                       const float odom_angle);
+  void ObserveOdometry(const Eigen::Vector2d& odom_loc,
+                       const double odom_angle);
 
 
   // Get latest map.
   std::vector<Eigen::Vector2f> GetMap();
-  void BuildRasterMapsFromPoints(const std::vector<Eigen::Vector2f> &points);
+  void BuildRasterMapsFromPoints(const std::vector<Eigen::Vector2d> &points);
   void BuildRasterMapsFromMap(const VectorMap& map);
-  std::vector<Eigen::Vector2f> AlignedPointCloud(const std::vector<Eigen::Vector2f>& point_cloud,
-                                  const Eigen::Vector2f& optimized_loc,
-                                  const float optimized_angle);
-  Eigen::Vector3d CorrelativeScanMatching(const std::vector<Eigen::Vector2f>& point_cloud,
-                                   const Eigen::Vector2f& odom_loc, 
-                                   const float odom_angle);
-  Eigen::Vector3d SingleCorrelativeScanMatching(const std::vector<Eigen::Vector2f>& point_cloud,
-                                   const Eigen::Vector2f& odom_loc, 
-                                   const float odom_angle,
-                                   const Eigen::Vector2f& prev_loc,
-                                   const float prev_angle);
+  std::vector<Eigen::Vector2d> AlignedPointCloud(const std::vector<Eigen::Vector2d>& point_cloud,
+                                  const Eigen::Vector2d& optimized_loc,
+                                  const double optimized_angle);
+  Eigen::Vector3d CorrelativeScanMatching(const std::vector<Eigen::Vector2d>& point_cloud,
+                                   const Eigen::Vector2d& odom_loc, 
+                                   const double odom_angle);
+  Eigen::Vector3d SingleCorrelativeScanMatching(const std::vector<Eigen::Vector2d>& point_cloud,
+                                   const Eigen::Vector2d& odom_loc, 
+                                   const double odom_angle,
+                                   const Eigen::Vector2d& prev_loc,
+                                   const double prev_angle);
 
   // Get latest robot pose.
-  void GetPose(Eigen::Vector2f* loc, float* angle) const;
+  void GetPose(Eigen::Vector2d* loc, double* angle) const;
 
  private:
   // Previous odometry-reported locations.
-  Eigen::Vector2f prev_odom_loc_;
+  Eigen::Vector2d prev_odom_loc_;
   bool readyToSlam_;
-  float prev_odom_angle_;
+  double prev_odom_angle_;
   bool odom_initialized_;
   std::map<std::pair<int,int>, double> high_res_raster_map_;
   std::map<std::pair<int,int>, double> low_res_raster_map_;
-  std::vector<std::vector<Eigen::Vector2f>> alignedPointsOverPoses_;
+  std::vector<std::vector<Eigen::Vector2d>> alignedPointsOverPoses_;
   std::vector<Eigen::Vector3d> optimizedPoses_;
 };
 }  // namespace slam

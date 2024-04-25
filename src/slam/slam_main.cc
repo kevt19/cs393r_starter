@@ -59,6 +59,7 @@ using math_util::RadToDeg;
 using ros::Time;
 using std::string;
 using std::vector;
+using Eigen::Vector2d;
 using Eigen::Vector2f;
 using visualization::ClearVisualizationMsg;
 using visualization::DrawArc;
@@ -145,8 +146,8 @@ void PublishMap() {
 }
 
 void PublishPose() {
-  Vector2f robot_loc(0, 0);
-  float robot_angle(0);
+  Vector2d robot_loc(0, 0);
+  double robot_angle(0);
   slam_.GetPose(&robot_loc, &robot_angle);
   amrl_msgs::Localization2DMsg localization_msg;
   localization_msg.pose.x = robot_loc.x();
@@ -174,8 +175,8 @@ void OdometryCallback(const nav_msgs::Odometry& msg) {
   if (FLAGS_v > 0) {
     printf("Odometry t=%f\n", msg.header.stamp.toSec());
   }
-  const Vector2f odom_loc(msg.pose.pose.position.x, msg.pose.pose.position.y);
-  const float odom_angle =
+  const Vector2d odom_loc(msg.pose.pose.position.x, msg.pose.pose.position.y);
+  const double odom_angle =
       2.0 * atan2(msg.pose.pose.orientation.z, msg.pose.pose.orientation.w);
   slam_.ObserveOdometry(odom_loc, odom_angle);
 }
