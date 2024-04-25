@@ -67,10 +67,10 @@ class SLAM {
   std::vector<Eigen::Vector2d> AlignedPointCloud(const std::vector<Eigen::Vector2d>& point_cloud,
                                   const Eigen::Vector2d& optimized_loc,
                                   const double optimized_angle);
-  Eigen::Vector3d CorrelativeScanMatching(const std::vector<Eigen::Vector2d>& point_cloud,
+  Eigen::Vector4d CorrelativeScanMatching(const std::vector<Eigen::Vector2d>& point_cloud,
                                    const Eigen::Vector2d& odom_loc, 
                                    const double odom_angle);
-  Eigen::Vector3d SingleCorrelativeScanMatching(const std::vector<Eigen::Vector2d>& point_cloud,
+  Eigen::Vector4d SingleCorrelativeScanMatching(const std::vector<Eigen::Vector2d>& point_cloud,
                                    const Eigen::Vector2d& odom_loc, 
                                    const double odom_angle,
                                    const Eigen::Vector2d& prev_loc,
@@ -91,6 +91,7 @@ class SLAM {
   std::vector<std::map<std::pair<int,int>, double>> low_res_raster_maps_;
   std::vector<std::vector<Eigen::Vector2d>> alignedPointsOverPoses_;
   std::vector<Eigen::Vector3d> optimizedPoses_;
+  std::vector<double> optimizedPosesVariances_;
 };
 }  // namespace slam
 

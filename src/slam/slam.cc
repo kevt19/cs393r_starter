@@ -50,6 +50,7 @@ using Eigen::Rotation2Df;
 using Eigen::Translation2f;
 using Eigen::Vector2d;
 using Eigen::Vector2f;
+using Eigen::Vector4d;
 using Eigen::Vector2i;
 using std::cout;
 using std::endl;
@@ -204,12 +205,13 @@ vector<Eigen::Vector2d> SLAM::AlignedPointCloud(const vector<Eigen::Vector2d>& p
   return aligned_point_cloud;
 }
 
-Eigen::Vector3d SLAM::CorrelativeScanMatching(const vector<Eigen::Vector2d>& point_cloud,
+Eigen::Vector4d SLAM::CorrelativeScanMatching(const vector<Eigen::Vector2d>& point_cloud,
                                    const Vector2d& odom_loc, 
                                    const double odom_angle) 
 {
   // get previous pose and loop backwards through all previous poses
   Eigen::Vector3d bestPoseCounter = Eigen::Vector3d(0.0d, 0.0d, 0.0d);
+  double bestPoseVarianceCounter = 0.0d;
   int min_i = std::max(0, (int) optimizedPoses_.size() - FLAGS_scan_match_timesteps);
   double n_iters = 0.0;
   for (int i = optimizedPoses_.size() - 1; i >= min_i; i--) 
@@ -219,20 +221,25 @@ Eigen::Vector3d SLAM::CorrelativeScanMatching(const vector<Eigen::Vector2d>& poi
     std::map<std::pair<int,int>, double> high_res_raster_map = high_res_raster_maps_[i];
     std::map<std::pair<int,int>, double> low_res_raster_map = low_res_raster_maps_[i];
 
-    Eigen::Vector3d bestPose = SingleCorrelativeScanMatching(point_cloud, odom_loc, odom_angle, prev_loc, prev_angle, low_res_raster_map, high_res_raster_map);
+    Eigen::Vector4d bestPoseWithVar = SingleCorrelativeScanMatching(point_cloud, odom_loc, odom_angle, prev_loc, prev_angle, low_res_raster_map, high_res_raster_map);
+    Eigen::Vector3d bestPose = Eigen::Vector3d(bestPoseWithVar.x(), bestPoseWithVar.y(), bestPoseWithVar.z());
+    double bestVariance = bestPoseWithVar.w();
     bestPoseCounter += bestPose;
+    bestPoseVarianceCounter += bestVariance;
     n_iters += 1.0;
   }
 
   if (n_iters == 0) {
-    return Eigen::Vector3d(0.0d, 0.0d, 0.0d); // this should never happen, probably better to create an exception here
+    return Eigen::Vector4d(0.0d, 0.0d, 0.0d, 0.0d); // this should never happen, probably better to create an exception here
   }
 
-  return bestPoseCounter / n_iters;
+  Eigen::Vector3d bestPose = bestPoseCounter / n_iters;
+  double bestVariance = bestPoseVarianceCounter / n_iters;
+  return Eigen::Vector4d(bestPose.x(), bestPose.y(), bestPose.z(), bestVariance);
 }
 
 
-Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d>& point_cloud,
+Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d>& point_cloud,
                                    const Vector2d& odom_loc, 
                                    const double odom_angle,
                                    const Eigen::Vector2d& prev_loc,
@@ -253,7 +260,12 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
   double maxY = startY + FLAGS_VoxelDistSize;
   double maxAngle = prev_angle + FLAGS_VoxelAngleSize;
 
-  SimpleQueue<Eigen::Vector3d, double> bestLowResVoxels;
+  SimpleQueue<Eigen::Vector4d, double> bestLowResVoxels;
+
+  Eigen::Matrix3d K = Eigen::Matrix3d::Zero();
+  Eigen::Vector3d u = Eigen::Vector3d(0.0d, 0.0d, 0.0d);
+  double s = 0.0d;
+  double term_idx = 0;
 
   // low res voxel grid
   for (double angle = minAngle; angle <= maxAngle; angle += FLAGS_incrementAngle) 
@@ -282,6 +294,8 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
         double log_prob_y = -pow((y - odom_loc.y()), 2) / (2*pow(FLAGS_sigma_y, 2)); 
         double log_prob_motion = log_prob_x + log_prob_y + log_prob_theta;
 
+        Eigen::Vector3d features = Eigen::Vector3d(x, y, angle);
+
         // check low-res map
         double log_prob_map = 0;
         for (const Eigen::Vector2d& r_point : rotated_points) 
@@ -296,24 +310,41 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
         }
 
         double log_prob = log_prob_motion + log_prob_map;
-        bestLowResVoxels.Push(Eigen::Vector3d(x, y, angle), log_prob);
+        // also multiply constant to make it a probability
+        double prob = exp(log_prob) * (1.0 / (2 * M_PI * FLAGS_sigma_x * FLAGS_sigma_y * FLAGS_sigma_theta));
+        Eigen::Matrix3d currentKTerm = features * features.transpose() * prob;
+        K += currentKTerm;
+        Eigen::Vector3d currentUTerm = features * prob;
+        u += currentUTerm;
+        s += prob;
+        bestLowResVoxels.Push(Eigen::Vector4d(x, y, angle, term_idx), log_prob);
+        term_idx += 1.0d;
       }
     }
   }
 
+  Eigen::Matrix3d CovPoses = K / s - 1 / pow(s,2) * (u * u.transpose());
+
   double bestLogProb = -100000.0;
+  int bestIdx = 0;
   double prev_angle_d = prev_angle;
   Eigen::Vector3d bestPose = Eigen::Vector3d(startX, startY, prev_angle_d);
 
   // now do high res search with priority queue
   while (!bestLowResVoxels.Empty())
   {
-    std::pair<Eigen::Vector3d, double> poppedVal = bestLowResVoxels.PopWithPriority();
-    Eigen::Vector3d bestLowResVoxel = poppedVal.first;
+    std::pair<Eigen::Vector4d, double> poppedVal = bestLowResVoxels.PopWithPriority();
+    Eigen::Vector4d bestLowResVoxelWithIdx = poppedVal.first;
+    Eigen::Vector3d bestLowResVoxel = Eigen::Vector3d(bestLowResVoxelWithIdx.x(), bestLowResVoxelWithIdx.y(), bestLowResVoxelWithIdx.z());
+    int idx = bestLowResVoxelWithIdx.w();
     double log_prob = poppedVal.second;
 
     if (log_prob < bestLogProb) {
-      return bestPose; // because optimistic search (heuristic never underestimates)
+      // add best cov to what we send back
+      // get diagonal i of covariance matrix
+      double bestCov = CovPoses.diagonal()[bestIdx];
+      Eigen::Vector4d bestPoseWithVar = Eigen::Vector4d(bestPose.x(), bestPose.y(), bestPose.z(), bestCov);
+      return bestPoseWithVar; // this only happens if the best is the very last one
     }
 
     // otherwise let's try our high-res search
@@ -366,12 +397,16 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
         double log_prob = log_prob_motion + high_res_log_prob_map;
         if (log_prob > bestLogProb) {
           bestLogProb = log_prob;
+          bestIdx = idx;
           bestPose = Eigen::Vector3d(x, y, angle);
         }
       }
     }
   }
-  return bestPose; // this only happens if the best is the very last one
+  // add best cov to what we send back
+    double bestCov = CovPoses.diagonal()[bestIdx];
+    Eigen::Vector4d bestPoseWithVar = Eigen::Vector4d(bestPose.x(), bestPose.y(), bestPose.z(), bestCov);
+    return bestPoseWithVar;
 }
 
   void SLAM::ObserveLaser(const vector<float>& ranges,
@@ -417,7 +452,9 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
     }
 
     // Get the optimized pose
-    Eigen::Vector3d optimized_pose = CorrelativeScanMatching(point_cloud, prev_odom_loc_, prev_odom_angle_);
+    Eigen::Vector4d optimized_pose_and_var = CorrelativeScanMatching(point_cloud, prev_odom_loc_, prev_odom_angle_);
+    Eigen::Vector3d optimized_pose = Eigen::Vector3d(optimized_pose_and_var.x(), optimized_pose_and_var.y(), optimized_pose_and_var.z());
+    double optimized_pose_variance = optimized_pose_and_var.w();
     Eigen::Vector2d optimized_loc = Eigen::Vector2d(optimized_pose.x(), optimized_pose.y());  
     double optimized_angle = optimized_pose.z();
     // update point cloud
@@ -431,12 +468,14 @@ Eigen::Vector3d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
       optimizedPoses_.erase(optimizedPoses_.begin());
       high_res_raster_maps_.erase(high_res_raster_maps_.begin());
       low_res_raster_maps_.erase(low_res_raster_maps_.begin());
+      optimizedPosesVariances_.erase(optimizedPosesVariances_.begin());
     }
 
     alignedPointsOverPoses_.push_back(aligned_point_cloud);
     optimizedPoses_.push_back(optimized_pose);
     high_res_raster_maps_.push_back(high_res_raster_map);
     low_res_raster_maps_.push_back(low_res_raster_map);
+    optimizedPosesVariances_.push_back(optimized_pose_variance);
     ready_to_csm_ = false; 
   }
 
