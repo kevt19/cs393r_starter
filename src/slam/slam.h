@@ -67,10 +67,10 @@ class SLAM {
   std::vector<Eigen::Vector2d> AlignPointCloud(const std::vector<Eigen::Vector2d>& point_cloud,
                                   const Eigen::Vector2d& optimized_loc,
                                   const double optimized_angle);
-  Eigen::Vector4d CorrelativeScanMatching(const std::vector<Eigen::Vector2d>& point_cloud,
+  std::vector<std::pair<Eigen::Vector3d, Eigen::MatrixXd>> CorrelativeScanMatching(const std::vector<Eigen::Vector2d>& point_cloud,
                                    const Eigen::Vector2d& odom_loc, 
                                    const double odom_angle);
-  Eigen::Vector4d SingleCorrelativeScanMatching(const std::vector<Eigen::Vector2d>& point_cloud,
+  std::pair<Eigen::Vector3d, Eigen::MatrixXd> SingleCorrelativeScanMatching(const std::vector<Eigen::Vector2d>& point_cloud,
                                    const Eigen::Vector2d& odom_loc, 
                                    const double odom_angle,
                                    const Eigen::Vector2d& prev_loc,
@@ -92,7 +92,7 @@ class SLAM {
   std::vector<std::vector<Eigen::Vector2d>> alignedPointsOverPoses_;
   std::vector<std::vector<Eigen::Vector2d>> pointClouds_;
   std::vector<Eigen::Vector3d> optimizedPoses_;
-  std::vector<double> optimizedPosesVariances_;
+  std::vector<Eigen::MatrixXd> optimizedPosesVariances_;
 
   // constants
   double raster_map_gaussian_sigma_constant;
