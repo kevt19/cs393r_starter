@@ -62,7 +62,7 @@ class SLAM {
   // Get latest map.
   std::vector<Eigen::Vector2f> GetMap();
   std::map<std::pair<int,int>, double> BuildLowResRasterMapFromHighRes(std::map<std::pair<int,int>, double> high_res_raster_map); 
-  std::map<std::pair<int,int>, double> BuildHighResRasterMapFromPoints(const std::vector<Eigen::Vector2d> &points);
+  std::map<std::pair<int,int>, double> BuildHighResRasterMapFromPoints(const std::vector<Eigen::Vector2d> &alignedPoints);
   std::map<std::pair<int,int>, double> BuildHighResRasterMapFromMap(const VectorMap& map);
   std::vector<Eigen::Vector2d> AlignPointCloud(const std::vector<Eigen::Vector2d>& point_cloud,
                                   const Eigen::Vector2d& optimized_loc,
