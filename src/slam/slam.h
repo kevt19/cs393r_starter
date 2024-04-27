@@ -64,9 +64,11 @@ class SLAM {
   std::map<std::pair<int,int>, double> BuildLowResRasterMapFromHighRes(std::map<std::pair<int,int>, double> high_res_raster_map); 
   std::map<std::pair<int,int>, double> BuildHighResRasterMapFromPoints(const std::vector<Eigen::Vector2d> &points);
   std::map<std::pair<int,int>, double> BuildHighResRasterMapFromMap(const VectorMap& map);
-  std::vector<Eigen::Vector2d> AlignedPointCloud(const std::vector<Eigen::Vector2d>& point_cloud,
+  std::vector<Eigen::Vector2d> AlignPointCloudToPrior(const std::vector<Eigen::Vector2d>& point_cloud,
                                   const Eigen::Vector2d& optimized_loc,
-                                  const double optimized_angle);
+                                  const double optimized_angle,
+                                  const Eigen::Vector2d& prior_loc,
+                                  const double prior_angle);
   Eigen::Vector4d CorrelativeScanMatching(const std::vector<Eigen::Vector2d>& point_cloud,
                                    const Eigen::Vector2d& odom_loc, 
                                    const double odom_angle);
@@ -90,6 +92,7 @@ class SLAM {
   std::vector<std::map<std::pair<int,int>, double>> high_res_raster_maps_;
   std::vector<std::map<std::pair<int,int>, double>> low_res_raster_maps_;
   std::vector<std::vector<Eigen::Vector2d>> alignedPointsOverPoses_;
+  std::vector<std::vector<Eigen::Vector2d>> pointClouds_;
   std::vector<Eigen::Vector3d> optimizedPoses_;
   std::vector<double> optimizedPosesVariances_;
 };
