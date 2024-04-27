@@ -70,17 +70,17 @@ DEFINE_int32(scan_match_timesteps, 1, "Number of previous poses / scans to optim
 
 DEFINE_double(raster_high_resolution, 0.1, "Resolution to rasterize the map to.");
 DEFINE_double(raster_low_resolution, 0.5, "Resolution to rasterize the map to.");
-DEFINE_double(raster_map_gaussian_sigma, 4.0, "Sigma for rasterized map.");
-DEFINE_double(raster_min_log_prob, -3.0, "Minimum log probability for map point."); // -3.0 is equivalent to 0.001 p
-DEFINE_double(maxMapDistance, 2.0, "Maximum distance to consider for log probabilities for map point.");
+DEFINE_double(raster_map_gaussian_sigma, 0.5, "Sigma for rasterized map.");
+DEFINE_double(raster_min_log_prob, -5.0, "Minimum log probability for map point."); // -3.0 is equivalent to 0.001 p
+DEFINE_double(maxMapDistance, 1.0, "Maximum distance to consider for log probabilities for map point.");
 
-DEFINE_double(sigma_x, 0.5, "Sigma for x in motion model.");
-DEFINE_double(sigma_y, 0.5, "Sigma for y in motion model.");
-DEFINE_double(sigma_theta, 0.5, "Sigma for theta in motion model.");
+DEFINE_double(sigma_x, 0.05, "Sigma for x in motion model.");
+DEFINE_double(sigma_y, 0.05, "Sigma for y in motion model.");
+DEFINE_double(sigma_theta, 0.05, "Sigma for theta in motion model.");
 
 DEFINE_double(incrementAngle, 30.0, "Increment in angle for motion model.");
 DEFINE_double(VoxelAngleSize, 30.0, "Maximum size to consider for angle away.");
-DEFINE_double(VoxelDistSize, 0.5, "Maximum size to consider for distance away.");
+DEFINE_double(VoxelDistSize, 2.0, "Maximum size to consider for distance away.");
 
 namespace slam 
 {
@@ -273,6 +273,7 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
  
   double prevAngleDeg = prev_angle * 180.0 / M_PI;
   double minAngle = prevAngleDeg - FLAGS_VoxelAngleSize;
+  minAngle = prevAngleDeg + FLAGS_VoxelAngleSize; // DEBUG STATEMENT: TODO: REMOVE
   double maxAngle = prevAngleDeg + FLAGS_VoxelAngleSize;
 
   // convert to radians
