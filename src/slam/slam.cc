@@ -212,42 +212,27 @@ vector<Eigen::Vector2d> SLAM::AlignPointCloud(const vector<Eigen::Vector2d>& poi
   return aligned_point_cloud;
 }
 
-Eigen::Vector4d SLAM::CorrelativeScanMatching(const vector<Eigen::Vector2d>& point_cloud,
+std::vector<std::pair<Eigen::Vector3d, Eigen::MatrixXd>> SLAM::CorrelativeScanMatching(const vector<Eigen::Vector2d>& point_cloud,
                                    const Vector2d& odom_loc, 
                                    const double odom_angle) 
 {
-  // get previous pose and loop backwards through all previous poses
-  // printf("Top of CSM\n");
-  Eigen::Vector3d bestPoseCounter = Eigen::Vector3d(0.0d, 0.0d, 0.0d);
-  double bestPoseVarianceCounter = 0.0d;
+  std::vector <std::pair<Eigen::Vector3d, Eigen::MatrixXd>> bestPosesWithVariances;
   int min_i = std::max(0, (int) optimizedPoses_.size() - FLAGS_scan_match_timesteps);
-  double n_iters = 0.0;
   for (int i = optimizedPoses_.size() - 1; i >= min_i; i--)
   {
     Eigen::Vector2d prev_loc = Eigen::Vector2d(optimizedPoses_[i].x(), optimizedPoses_[i].y());
     double prev_angle = optimizedPoses_[i].z();
     std::map<std::pair<int,int>, double> high_res_raster_map = high_res_raster_maps_[i];
     std::map<std::pair<int,int>, double> low_res_raster_map = low_res_raster_maps_[i];
-    Eigen::Vector4d bestPoseWithVar = SingleCorrelativeScanMatching(point_cloud, odom_loc, odom_angle, prev_loc, prev_angle, low_res_raster_map, high_res_raster_map);
-    Eigen::Vector3d bestPose = Eigen::Vector3d(bestPoseWithVar.x(), bestPoseWithVar.y(), bestPoseWithVar.z());
-    double bestVariance = bestPoseWithVar.w();
-    bestPoseCounter += bestPose;
-    bestPoseVarianceCounter += bestVariance;
-    n_iters += 1.0;
+    std::pair<Eigen::Vector3d, Eigen::MatrixXd> bestPoseWithVar = SingleCorrelativeScanMatching(point_cloud, odom_loc, odom_angle, prev_loc, prev_angle, low_res_raster_map, high_res_raster_map);
+    Eigen::Vector3d bestPose = bestPoseWithVar.first;
+    Eigen::MatrixXd bestCovariance = bestPoseWithVar.second;
+    bestPosesWithVariances.push_back(std::make_pair(bestPose, bestCovariance));
   }
-
-  // printf("Bottom of CSM\n");
-
-  if (n_iters == 0.0) {
-    return Eigen::Vector4d(0.0d, 0.0d, 0.0d, 0.0d); // this should never happen, probably better to create an exception here
-  }
-
-  Eigen::Vector3d bestPose = bestPoseCounter / n_iters;
-  double bestVariance = bestPoseVarianceCounter / n_iters;
-  return Eigen::Vector4d(bestPose.x(), bestPose.y(), bestPose.z(), bestVariance);
+  return bestPosesWithVariances;
 }
 
-Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d>& point_cloud,
+std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d>& point_cloud,
                                    const Vector2d& odom_loc, 
                                    const double odom_angle,
                                    const Eigen::Vector2d& prev_loc,
@@ -281,7 +266,7 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
   Eigen::MatrixXd K = Eigen::MatrixXd::Zero(3, 3);
   Eigen::Vector3d u = Eigen::Vector3d(0.0d, 0.0d, 0.0d);
   double s = 0.0d;
-  double term_idx = 0; // saved so we can extract from diagnal later
+  double term_idx = 0.0; // saved so we can extract from diagnal later
 
   // low res voxel grid search
   for (double angle = minAngle; angle <= maxAngle; angle += incrementAngleRad) 
@@ -350,7 +335,6 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
   Eigen::MatrixXd CovPoses = K / s - 1 / pow(s,2) * (u * u.transpose());
 
   double bestLogProb = -100000.0;
-  int bestIdx = 0;
   double prev_angle_d = prev_angle;
   Eigen::Vector3d bestPose = Eigen::Vector3d(startX, startY, prev_angle_d);
 
@@ -360,12 +344,10 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
     std::pair<Eigen::Vector4d, double> poppedVal = bestLowResVoxels.PopWithPriority();
     Eigen::Vector4d bestLowResVoxelWithIdx = poppedVal.first;
     Eigen::Vector3d bestLowResVoxel = Eigen::Vector3d(bestLowResVoxelWithIdx.x(), bestLowResVoxelWithIdx.y(), bestLowResVoxelWithIdx.z());
-    int idx = bestLowResVoxelWithIdx.w();
     double log_prob = poppedVal.second;
 
     if (log_prob < bestLogProb) {
-      double bestCov = CovPoses(bestIdx, bestIdx);
-      Eigen::Vector4d bestPoseWithVar = Eigen::Vector4d(bestPose.x(), bestPose.y(), bestPose.z(), bestCov);
+      std::pair<Eigen::Vector3d, Eigen::MatrixXd> bestPoseWithVar = std::make_pair(bestPose, CovPoses);
       return bestPoseWithVar;
     }
 
@@ -428,16 +410,13 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
           // printf("Found better log prob: %f\n", log_prob);
           // printf("Log prob decomposed into: %f, %f, %f, %f\n", log_prob_motion_constant, log_prob_motion, high_res_log_prob_map, log_prob);
           bestLogProb = log_prob;
-          bestIdx = idx;
           bestPose = Eigen::Vector3d(x, y, angle);
         }
       }
     }
   }
-  // add best cov to what we send back
-    double bestCov = CovPoses(bestIdx, bestIdx);
-    Eigen::Vector4d bestPoseWithVar = Eigen::Vector4d(bestPose.x(), bestPose.y(), bestPose.z(), bestCov);
-    return bestPoseWithVar;
+  std::pair<Eigen::Vector3d, Eigen::MatrixXd> bestPoseWithVar = std::make_pair(bestPose, CovPoses);
+  return bestPoseWithVar;
 }
 
   void SLAM::ObserveLaser(const vector<float>& ranges,
@@ -478,7 +457,8 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
       high_res_raster_maps_.push_back(BuildHighResRasterMapFromPoints(aligned_point_cloud));
       low_res_raster_maps_.push_back(BuildLowResRasterMapFromHighRes(high_res_raster_maps_[0]));
       alignedPointsOverPoses_.push_back(aligned_point_cloud);
-      optimizedPosesVariances_.push_back(0.0d);
+      Eigen::MatrixXd initial_cov = Eigen::MatrixXd::Zero(3, 3);
+      optimizedPosesVariances_.push_back(initial_cov);
       ready_to_csm_ = false; 
       return;
     }
@@ -491,33 +471,38 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
     Eigen::Vector3d prev_optimized_pose = optimizedPoses_[num_scans - 1];
     Eigen::Vector2d prev_optimized_loc = Eigen::Vector2d(prev_optimized_pose.x(), prev_optimized_pose.y());
     double prev_optimized_angle = optimizedPoses_[num_scans - 1].z();
-    Eigen::Vector4d optimized_pose_and_var = CorrelativeScanMatching(point_cloud, prev_optimized_loc, prev_optimized_angle);
-    Eigen::Vector3d optimized_pose = Eigen::Vector3d(optimized_pose_and_var.x(), optimized_pose_and_var.y(), optimized_pose_and_var.z());
-    double optimized_pose_variance = optimized_pose_and_var.w();
-    Eigen::Vector2d optimized_loc = Eigen::Vector2d(optimized_pose.x(), optimized_pose.y());  
-    double optimized_angle = optimized_pose.z();
-    // update point cloud
-    std::vector<Eigen::Vector2d> aligned_point_cloud = AlignPointCloud(point_cloud, optimized_loc, optimized_angle);
-    std::map<std::pair<int,int>, double> high_res_raster_map = BuildHighResRasterMapFromPoints(aligned_point_cloud);
-    std::map<std::pair<int,int>, double> low_res_raster_map = BuildLowResRasterMapFromHighRes(high_res_raster_map);
+    std::vector<std::pair<Eigen::Vector3d, Eigen::MatrixXd>> all_optimized_pose_and_var = CorrelativeScanMatching(point_cloud, prev_optimized_loc, prev_optimized_angle);
+    
+    int num_new_optimized_poses = all_optimized_pose_and_var.size();
 
-    // if we have too many poses, remove the oldest one
-    if (num_scans >= FLAGS_slam_num_poses) {
-      pointClouds_.erase(pointClouds_.begin());
-      alignedPointsOverPoses_.erase(alignedPointsOverPoses_.begin());
-      optimizedPoses_.erase(optimizedPoses_.begin());
-      high_res_raster_maps_.erase(high_res_raster_maps_.begin());
-      low_res_raster_maps_.erase(low_res_raster_maps_.begin());
-      optimizedPosesVariances_.erase(optimizedPosesVariances_.begin());
+    for (int i = 0; i < num_new_optimized_poses; i++) {
+      Eigen::Vector3d optimized_pose = all_optimized_pose_and_var[i].first;
+      Eigen::MatrixXd optimized_var = all_optimized_pose_and_var[i].second;
+      Eigen::Vector2d optimized_loc = Eigen::Vector2d(optimized_pose.x(), optimized_pose.y());  
+      double optimized_angle = optimized_pose.z();
+      // update point cloud
+      std::vector<Eigen::Vector2d> aligned_point_cloud = AlignPointCloud(point_cloud, optimized_loc, optimized_angle);
+      std::map<std::pair<int,int>, double> high_res_raster_map = BuildHighResRasterMapFromPoints(aligned_point_cloud);
+      std::map<std::pair<int,int>, double> low_res_raster_map = BuildLowResRasterMapFromHighRes(high_res_raster_map);
+
+      // if we have too many poses, remove the oldest one
+      if (num_scans >= FLAGS_slam_num_poses) {
+        pointClouds_.erase(pointClouds_.begin());
+        alignedPointsOverPoses_.erase(alignedPointsOverPoses_.begin());
+        optimizedPoses_.erase(optimizedPoses_.begin());
+        high_res_raster_maps_.erase(high_res_raster_maps_.begin());
+        low_res_raster_maps_.erase(low_res_raster_maps_.begin());
+        optimizedPosesVariances_.erase(optimizedPosesVariances_.begin());
+      }
+
+      pointClouds_.push_back(point_cloud);
+      alignedPointsOverPoses_.push_back(aligned_point_cloud);
+      optimizedPoses_.push_back(optimized_pose);
+      high_res_raster_maps_.push_back(high_res_raster_map);
+      low_res_raster_maps_.push_back(low_res_raster_map);
+      optimizedPosesVariances_.push_back(optimized_var);
+      ready_to_csm_ = false; 
     }
-
-    pointClouds_.push_back(point_cloud);
-    alignedPointsOverPoses_.push_back(aligned_point_cloud);
-    optimizedPoses_.push_back(optimized_pose);
-    high_res_raster_maps_.push_back(high_res_raster_map);
-    low_res_raster_maps_.push_back(low_res_raster_map);
-    optimizedPosesVariances_.push_back(optimized_pose_variance);
-    ready_to_csm_ = false; 
   }
 
   void SLAM::PoseGraphOptimization() {
