@@ -68,19 +68,19 @@ DEFINE_double(slam_max_range, 10.0, "Maximum range to keep a laser reading.");
 DEFINE_int32(slam_num_poses, 10, "Number of poses to keep for SLAM Pose Graph optimization.");
 DEFINE_int32(scan_match_timesteps, 1, "Number of previous poses / scans to optimize current pose for.");
 
-DEFINE_double(raster_high_resolution, 0.1, "Resolution to rasterize the map to.");
+DEFINE_double(raster_high_resolution, 0.05, "Resolution to rasterize the map to.");
 DEFINE_double(raster_low_resolution, 0.5, "Resolution to rasterize the map to.");
 DEFINE_double(raster_map_gaussian_sigma, 0.5, "Sigma for rasterized map.");
 DEFINE_double(raster_min_log_prob, -5.0, "Minimum log probability for map point."); // -3.0 is equivalent to 0.001 p
 DEFINE_double(maxMapDistance, 1.0, "Maximum distance to consider for log probabilities for map point.");
 
-DEFINE_double(sigma_x, 0.05, "Sigma for x in motion model.");
-DEFINE_double(sigma_y, 0.05, "Sigma for y in motion model.");
-DEFINE_double(sigma_theta, 0.05, "Sigma for theta in motion model.");
+DEFINE_double(sigma_x, 0.5, "Sigma for x in motion model.");
+DEFINE_double(sigma_y, 0.5, "Sigma for y in motion model.");
+DEFINE_double(sigma_theta, 0.5, "Sigma for theta in motion model.");
 
-DEFINE_double(incrementAngle, 30.0, "Increment in angle for motion model.");
+DEFINE_double(incrementAngle, 1.0, "Increment in angle for motion model.");
 DEFINE_double(VoxelAngleSize, 30.0, "Maximum size to consider for angle away.");
-DEFINE_double(VoxelDistSize, 2.0, "Maximum size to consider for distance away.");
+DEFINE_double(VoxelDistSize, 0.75, "Maximum size to consider for distance away.");
 
 namespace slam 
 {
@@ -117,7 +117,7 @@ std::map<std::pair<int,int>, double> SLAM::BuildLowResRasterMapFromHighRes(std::
     int x = entry.first.first;
     int y = entry.first.second;
     double log_prob = entry.second;
-    double ratio = FLAGS_raster_low_resolution / FLAGS_raster_high_resolution;
+    double ratio = FLAGS_raster_high_resolution / FLAGS_raster_low_resolution;
     int low_res_lookup_x = x * ratio;
     int low_res_lookup_y = y * ratio;
     std::pair<int,int> low_res_lookup_key = std::make_pair(low_res_lookup_x, low_res_lookup_y);
@@ -273,7 +273,7 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
  
   double prevAngleDeg = prev_angle * 180.0 / M_PI;
   double minAngle = prevAngleDeg - FLAGS_VoxelAngleSize;
-  minAngle = prevAngleDeg + FLAGS_VoxelAngleSize; // DEBUG STATEMENT: TODO: REMOVE
+  // minAngle = prevAngleDeg + FLAGS_VoxelAngleSize; // DEBUG STATEMENT: TODO: REMOVE
   double maxAngle = prevAngleDeg + FLAGS_VoxelAngleSize;
 
   // convert to radians
@@ -384,7 +384,7 @@ Eigen::Vector4d SLAM::SingleCorrelativeScanMatching(const vector<Eigen::Vector2d
     double maxY = lowResY + FLAGS_raster_low_resolution;
 
     double delta_angle = angle - prev_angle;
-    double log_prob_theta = -pow((delta_angle), 2) / (2*pow(FLAGS_sigma_theta, 2));
+    double log_prob_theta = -pow((delta_angle), 2) / (2*pow(FLAGS_sigma_theta, 2)); // TODO fix speedup
     Eigen::Rotation2Dd r_optimized_pose_to_first_pose(1.0 * angle);
     Eigen::Matrix2d R = r_optimized_pose_to_first_pose.toRotationMatrix();
 
