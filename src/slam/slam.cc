@@ -59,17 +59,17 @@ using std::swap;
 using std::vector;
 using vector_map::VectorMap;
 
-DEFINE_double(slam_dist_threshold, 20.5, "Position threshold for SLAM.");
+DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 
 DEFINE_double(slam_min_range, 0.01, "Minimum range to keep a laser reading.");
 DEFINE_double(slam_max_range, 10.0, "Maximum range to keep a laser reading.");
 
-DEFINE_int32(slam_num_poses, 10, "Number of poses to keep for SLAM Pose Graph optimization.");
+DEFINE_int32(slam_num_poses, 100, "Number of poses to keep for SLAM Pose Graph optimization.");
 DEFINE_int32(scan_match_timesteps, 1, "Number of previous poses / scans to optimize current pose for.");
 
-DEFINE_double(raster_high_resolution, 0.05, "Resolution to rasterize the map to.");
-DEFINE_double(raster_low_resolution, 0.5, "Resolution to rasterize the map to.");
+DEFINE_double(raster_high_resolution, 0.2, "Resolution to rasterize the map to.");
+DEFINE_double(raster_low_resolution, 1.0, "Resolution to rasterize the map to.");
 DEFINE_double(raster_map_gaussian_sigma, 0.5, "Sigma for rasterized map.");
 DEFINE_double(raster_min_log_prob, -5.0, "Minimum log probability for map point."); // -3.0 is equivalent to 0.001 p
 DEFINE_double(maxMapDistance, 1.0, "Maximum distance to consider for log probabilities for map point.");
@@ -78,7 +78,7 @@ DEFINE_double(sigma_x, 0.5, "Sigma for x in motion model.");
 DEFINE_double(sigma_y, 0.5, "Sigma for y in motion model.");
 DEFINE_double(sigma_theta, 0.5, "Sigma for theta in motion model.");
 
-DEFINE_double(incrementAngle, 1.0, "Increment in angle for motion model.");
+DEFINE_double(incrementAngle, 2.0, "Increment in angle for motion model.");
 DEFINE_double(VoxelAngleSize, 30.0, "Maximum size to consider for angle away.");
 DEFINE_double(VoxelDistSize, 0.75, "Maximum size to consider for distance away.");
 
