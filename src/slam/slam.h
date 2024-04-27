@@ -27,15 +27,15 @@
 #include <map>
 #include "vector_map/vector_map.h"
 
-// #include <gtsam/geometry/Pose2.h>
-// #include <gtsam/nonlinear/NonlinearFactorGraph.h>
-// #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
-// #include <gtsam/nonlinear/Values.h>
-// #include <gtsam/slam/BetweenFactor.h>
-// #include <gtsam/inference/Symbol.h>
-// #include <gtsam/slam/PriorFactor.h>
+#include <gtsam/geometry/Pose2.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
+#include <gtsam/nonlinear/Values.h>
+#include <gtsam/slam/BetweenFactor.h>
+#include <gtsam/inference/Symbol.h>
+#include <gtsam/slam/PriorFactor.h>
 
-// using namespace gtsam;
+
 using vector_map::VectorMap;
 
 #ifndef SRC_SLAM_H_
@@ -77,6 +77,10 @@ class SLAM {
                                    const double prev_angle,
                                    std::map<std::pair<int,int>, double> low_res_raster_map,
                                    std::map<std::pair<int,int>, double> high_res_raster_map);
+
+
+
+  void PoseGraphOptimization();
 
   // Get latest robot pose.
   void GetPose(Eigen::Vector2d* loc, double* angle) const;
