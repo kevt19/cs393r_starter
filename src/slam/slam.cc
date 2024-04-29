@@ -92,6 +92,7 @@ namespace slam
     log_prob_y_constant = (2*pow(FLAGS_sigma_y, 2));
     log_prob_theta_constant = (2*pow(FLAGS_sigma_theta, 2));
     log_prob_motion_constant = -0.5 * log(2.0 * M_PI * pow(FLAGS_sigma_x, 2) * pow(FLAGS_sigma_y, 2) * pow(FLAGS_sigma_theta, 2));
+
   }
 
 
@@ -502,46 +503,59 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       low_res_raster_maps_.push_back(low_res_raster_map);
       optimizedPosesVariances_.push_back(optimized_var);
       ready_to_csm_ = false; 
+
+      // add to factor graph
+      // printf("sTart\n");
+      Eigen::Vector3d optimized_var_diag = optimized_var.diagonal();
+      Vector3 optimized_std_diag = Vector3(optimized_var_diag.x(), optimized_var_diag.y(), optimized_var_diag.z());
+      noiseModel::Diagonal::shared_ptr stdForOptimizedPose = noiseModel::Diagonal::Sigmas(optimized_std_diag);
+      Eigen::Vector3d priorPose = optimizedPoses_[num_scans - 1 - i];
+      // printf("fo\n");
+      Eigen::Vector3d deltaPose = optimized_pose - priorPose;
+      Pose2 deltaPoseForGraph = Pose2(deltaPose.x(), deltaPose.y(), deltaPose.z());
+      Pose2 optimizedPoseForGraph = Pose2(optimized_pose.x(), optimized_pose.y(), optimized_pose.z());
+      // printf("before adding\n");
+      graph_.add(BetweenFactor<Pose2>(nNodesInGraph - i, nNodesInGraph + 1, deltaPoseForGraph, stdForOptimizedPose));
+      initialGuesses_.insert(nNodesInGraph + 1, optimizedPoseForGraph);
+      // printf("after inserting\n");
+      nNodesInGraph += 1;
+    }
+
+    if (nNodesInGraph > 10 && nNodesInGraph % 20 == 0) {
+      PoseGraphOptimization();
+
     }
   }
 
   void SLAM::PoseGraphOptimization() {
-  NonlinearFactorGraph graph;
+    // Optimize the graph using Levenberg-Marquardt optimization
+    LevenbergMarquardtOptimizer optimizer(graph_, initialGuesses_);
+    // printf("before optimizing\n");
+    Values result = optimizer.optimize();
+    for (int i = nNodesInGraph - 1; i >= 0; i--)
+    {
+      double x = result.at<Pose2>(i + 1).x();
+      double y = result.at<Pose2>(i + 1).y();
+      double theta = result.at<Pose2>(i + 1).theta();
+      // printf("initial guess %f, %f", initialGuesses_.at<Pose2>(i).x(), initialGuesses_.at<Pose2>(i).y());
+      // printf("optimized loc %f, %f", optimizedPoses_[i].x(), optimizedPoses_[i].y());
+      // printf("updated optimized loc %f, %f", x, y);
 
-  // Define noise models for the measurements
-  noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Sigmas(Vector3(0.3, 0.3, 0.1)); // Prior noise
-  noiseModel::Diagonal::shared_ptr model = noiseModel::Diagonal::Sigmas(Vector3(0.2, 0.2, 0.1));      // Odometry noise
+      Eigen::Vector3d updatedOptimizedPose = Eigen::Vector3d(x, y, theta);
+      Eigen::Vector2d updatedOptimizedLoc = Eigen::Vector2d(x, y);
+      
+      // update our vector
+      optimizedPoses_[i] = updatedOptimizedPose;
+      // update aligned point clouds
+      
+      std::vector<Eigen::Vector2d> updatedAlignedPointCloud = AlignPointCloud(pointClouds_[i], updatedOptimizedLoc, theta);
+      alignedPointsOverPoses_[i] = updatedAlignedPointCloud; 
+    }
 
-  // Add a prior factor on the first pose (anchor this pose as the reference)
-  graph.add(PriorFactor<Pose2>(1, Pose2(0, 0, 0), priorNoise));
+    // update optimized poses and aligned pcs
 
-  // Add odometry factors
-  // Here, the robot moves 2 meters forward, then turns 90 degrees right three times
-  graph.add(BetweenFactor<Pose2>(1, 2, Pose2(2, 0, 0), model));
-  graph.add(BetweenFactor<Pose2>(2, 3, Pose2(2, 0, -M_PI_2), model));
-  graph.add(BetweenFactor<Pose2>(3, 4, Pose2(2, 0, -M_PI_2), model));
-  graph.add(BetweenFactor<Pose2>(4, 5, Pose2(2, 0, -M_PI_2), model));
-
-  // Add the loop closure constraint
-  graph.add(BetweenFactor<Pose2>(5, 2, Pose2(2, 0, -M_PI_2), model));
-
-  // Create the initial estimate to the solution
-  // Initialize all poses as the same pose
-  Values initialEstimates;
-  for (int i = 1; i <= 5; ++i) {
-      initialEstimates.insert(i, Pose2(0.5 * i, 0, -M_PI_2 * (i-1) / 2));
+    // printf("after optimizing\n");
   }
-
-  // Optimize the graph using Levenberg-Marquardt optimization
-  LevenbergMarquardtOptimizer optimizer(graph, initialEstimates);
-  Values result = optimizer.optimize();
-
-  // Print out the optimized poses
-  for (int i = 1; i <= 5; ++i) {
-      Pose2 pose = result.at<Pose2>(i);
-      std::cout << "Optimized Pose " << i << ": x = " << pose.x() << ", y = " << pose.y() << ", theta = " << pose.theta() << std::endl;
-  }
-}
 
 void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
   if (!odom_initialized_) {
@@ -549,6 +563,10 @@ void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
     prev_odom_loc_ = odom_loc;    
     odom_initialized_ = true;
     ready_to_csm_ = true;
+
+    noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Sigmas(Vector3(0.0, 0.0, 0.0));
+    graph_.add(PriorFactor<Pose2>(1, Pose2(0, 0, 0), priorNoise));
+    initialGuesses_.insert(1, Pose2(odom_loc.x(), odom_loc.y(), odom_angle));
     return;
   }
 

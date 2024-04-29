@@ -35,6 +35,8 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/PriorFactor.h>
 
+using namespace gtsam;
+
 
 using vector_map::VectorMap;
 
@@ -97,6 +99,9 @@ class SLAM {
   std::vector<std::vector<Eigen::Vector2d>> pointClouds_;
   std::vector<Eigen::Vector3d> optimizedPoses_;
   std::vector<Eigen::MatrixXd> optimizedPosesVariances_;
+  int nNodesInGraph = 1;
+  NonlinearFactorGraph graph_;
+  Values initialGuesses_;
 
   // constants
   double raster_map_gaussian_sigma_constant;
