@@ -54,6 +54,7 @@ using std::vector;
 using vector_map::VectorMap;
 
 DEFINE_int32(laserInterval, 20, "Number of lasers to use.");
+DEFINE_int32(nNodesBeforeSLAM, 20, "Number of nodes to add to gtsam before calling optimize.");
 DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 
@@ -436,7 +437,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
     std::vector<Eigen::Vector2d> point_cloud;
     for (size_t i = 0; i < num_ranges; i++)
     {
-      if (i % 20 != 0) {
+      if (i % FLAGS_laserInterval != 0) {
         continue;
       }
       double range = ranges[i];
@@ -525,7 +526,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       nNodesInGraph += 1;
     }
 
-    if (nNodesInGraph > 10 && nNodesInGraph % 20 == 0) {
+    if (nNodesInGraph > 10 && nNodesInGraph % FLAGS_nNodesBeforeSLAM == 0) {
       PoseGraphOptimization();
 
     }
