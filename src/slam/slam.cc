@@ -58,7 +58,7 @@ DEFINE_int32(nNodesBeforeSLAM, 5, "Number of nodes to add to gtsam before callin
 DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 DEFINE_int32(maxPointsInMap, 5000, "Maximum number of points in the map.");
-DEFINE_bool(run_pose_graph_optimization, false, "Run Pose Graph Optimization.");
+DEFINE_bool(run_pose_graph_optimization, true, "Run Pose Graph Optimization.");
 DEFINE_bool(groundTruthLocalization, true, "Use ground truth localization");
 
 DEFINE_double(slam_min_range, 0.01, "Minimum range to keep a laser reading.");
@@ -587,6 +587,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       // printf("sTart\n");
       Eigen::Vector3d optimized_var_diag = optimized_var.diagonal();
       Vector3 optimized_std_diag = Vector3(optimized_var_diag.x(), optimized_var_diag.y(), optimized_var_diag.z());
+      noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Sigmas(Vector3(0.0, 0.0, 0.0));
       noiseModel::Diagonal::shared_ptr stdForOptimizedPose = noiseModel::Diagonal::Sigmas(optimized_std_diag);
       Eigen::Vector3d priorPose = optimizedPoses_[num_scans - 1 - i];
       // printf("fo\n");
