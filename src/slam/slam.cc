@@ -435,6 +435,9 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
     std::vector<Eigen::Vector2d> point_cloud;
     for (size_t i = 0; i < num_ranges; i++)
     {
+      if (i % 20 != 0) {
+        continue;
+      }
       double range = ranges[i];
       if (FLAGS_slam_min_range < range && range < FLAGS_slam_max_range && range_min < range && range < range_max) {
         double angle = angle_min + i * angle_increment;
