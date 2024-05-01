@@ -53,8 +53,8 @@ using std::swap;
 using std::vector;
 using vector_map::VectorMap;
 
-DEFINE_int32(laserInterval, 20, "Number of lasers to use.");
-DEFINE_int32(nNodesBeforeSLAM, 20, "Number of nodes to add to gtsam before calling optimize.");
+DEFINE_int32(laserInterval, 5, "Number of intervals between lasers.");
+DEFINE_int32(nNodesBeforeSLAM, 5, "Number of nodes to add to gtsam before calling optimize.");
 DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 
@@ -528,7 +528,8 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
 
     if (nNodesInGraph > 10 && nNodesInGraph % FLAGS_nNodesBeforeSLAM == 0) {
       PoseGraphOptimization();
-
+      SetMapPointCloud();
+      ClearPreviousData();
     }
   }
 
@@ -587,15 +588,28 @@ void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
   prev_odom_angle_ = odom_angle;
 }
 
-vector<Vector2f> SLAM::GetMap() {
-  vector<Vector2f> map;
+void SLAM::ClearPreviousData() {
+  // clear all data
+  optimizedPoses_.clear();
+  pointClouds_.clear();
+  alignedPointsOverPoses_.clear();
+  high_res_raster_maps_.clear();
+  low_res_raster_maps_.clear();
+  optimizedPosesVariances_.clear();
+  graph_ = NonlinearFactorGraph();
+  initialGuesses_ = Values();
+  nNodesInGraph = 1;
+  odom_initialized_ = false;
+}
+
+void SLAM::SetMapPointCloud() {
   // Reconstruct the map as a single aligned point cloud from all saved poses
   // and their respective scans.
 
   // convert w.r.t first pose
   int num_scans = alignedPointsOverPoses_.size();
   if (num_scans == 0) {
-    return map;
+    return;
   }
 
   for (int i = 0; i < num_scans; i++) {
@@ -603,10 +617,13 @@ vector<Vector2f> SLAM::GetMap() {
     for (const Eigen::Vector2d& point : point_cloud) {
       float x = point.x();
       float y = point.y();
-      map.push_back(Eigen::Vector2f(x, y));
+      map_.push_back(Eigen::Vector2f(x, y));
     }
   }
-  return map;
+}
+
+vector<Vector2f> SLAM::GetMap() {
+  return map_;
 }
 
 }  // namespace slam
