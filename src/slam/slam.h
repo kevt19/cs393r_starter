@@ -79,24 +79,30 @@ class SLAM {
                                    const double prev_angle,
                                    std::map<std::pair<int,int>, double> low_res_raster_map,
                                    std::map<std::pair<int,int>, double> high_res_raster_map);
+  void UpdateLocation(const Eigen::Vector2f& odom_loc, const float odom_angle);
   void PoseGraphOptimization();
   void SetMapPointCloud();
   void ClearPreviousData();
 
   // Get latest robot pose.
   void GetPose(Eigen::Vector2d* loc, double* angle) const;
+  bool usingGroundTruthLocalization_;
+
 
  private:
   // Previous odometry-reported locations.
-  Eigen::Vector2d prev_odom_loc_;
+  Eigen::Vector2d prev_loc_;
+  double prev_angle_;
+  Eigen::Vector2d current_loc_;
+  double current_angle_;
   bool ready_to_csm_;
-  double prev_odom_angle_;
-  bool odom_initialized_;
+  bool location_initialized_;
   std::vector<std::map<std::pair<int,int>, double>> high_res_raster_maps_;
   std::vector<std::map<std::pair<int,int>, double>> low_res_raster_maps_;
   std::vector<std::vector<Eigen::Vector2d>> alignedPointsOverPoses_;
   std::vector<std::vector<Eigen::Vector2d>> pointClouds_;
   std::vector<Eigen::Vector3d> optimizedPoses_;
+  std::vector<Eigen::Vector3d> odometryPoses_;
   std::vector<Eigen::MatrixXd> optimizedPosesVariances_;
   int nNodesInGraph = 1;
   NonlinearFactorGraph graph_;

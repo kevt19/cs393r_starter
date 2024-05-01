@@ -72,6 +72,7 @@ using visualization::DrawParticle;
 // Create command line arguements
 DEFINE_string(laser_topic, "/scan", "Name of ROS topic for LIDAR data");
 DEFINE_string(odom_topic, "/odom", "Name of ROS topic for odometry data");
+DEFINE_string(loc_topic, "localization", "Name of ROS topic for localization");
 DEFINE_bool(publishPose, false, "Publish the pose of the robot");
 
 DECLARE_int32(v);
@@ -123,6 +124,13 @@ void PublishPose() {
   localization_publisher_.publish(localization_msg);
 }
 
+/// Just used for tuning/debugging. Ground truth localization.
+void LocalizationCallback(const amrl_msgs::Localization2DMsg msg) {
+  if (slam_.usingGroundTruthLocalization_) {
+    slam_.UpdateLocation(Vector2f(msg.pose.x, msg.pose.y), msg.pose.theta);
+  }
+}
+
 void LaserCallback(const sensor_msgs::LaserScan& msg) {
   if (FLAGS_v > 0) {
     printf("Laser t=%f\n", msg.header.stamp.toSec());
@@ -165,6 +173,8 @@ int main(int argc, char** argv) {
       FLAGS_laser_topic.c_str(),
       1,
       LaserCallback);
+  ros::Subscriber localization_sub =
+      n.subscribe(FLAGS_loc_topic, 1, &LocalizationCallback);
   ros::Subscriber odom_sub = n.subscribe(
       FLAGS_odom_topic.c_str(),
       1,
