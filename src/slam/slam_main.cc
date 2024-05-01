@@ -72,6 +72,7 @@ using visualization::DrawParticle;
 // Create command line arguements
 DEFINE_string(laser_topic, "/scan", "Name of ROS topic for LIDAR data");
 DEFINE_string(odom_topic, "/odom", "Name of ROS topic for odometry data");
+DEFINE_bool(publishPose, false, "Publish the pose of the robot");
 
 DECLARE_int32(v);
 
@@ -109,6 +110,9 @@ void PublishMap() {
 }
 
 void PublishPose() {
+  if (!FLAGS_publishPose) {
+    return;
+  }
   Vector2d robot_loc(0, 0);
   double robot_angle(0);
   slam_.GetPose(&robot_loc, &robot_angle);

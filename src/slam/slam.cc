@@ -99,9 +99,9 @@ namespace slam
 
 
 void SLAM::GetPose(Eigen::Vector2d* loc, double* angle) const {
-  loc = &latestOptimizedPose_.head(2);
+  *loc = latestOptimizedPose_.head(2);
   const double angleOut = latestOptimizedPose_.z();
-  angle = &angleOut;
+  *angle = angleOut;
 }
 
 std::map<std::pair<int,int>, double> SLAM::BuildLowResRasterMapFromHighRes(std::map<std::pair<int,int>, double> high_res_raster_map) 
@@ -529,7 +529,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
     }
 
     if (nNodesInGraph > 10 && nNodesInGraph % FLAGS_nNodesBeforeSLAM == 0) {
-      PoseGraphOptimization();
+      // PoseGraphOptimization();
       SetMapPointCloud();
       ClearPreviousData();
     }
@@ -561,7 +561,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
     }
 
     // add last optimizedPose to current loc
-    latestOptimizedPose_ = optimizedPoses_[nNodesInGraph - 1];
+    // latestOptimizedPose_ = optimizedPoses_[nNodesInGraph - 1];
 
     // update optimized poses and aligned pcs
 
