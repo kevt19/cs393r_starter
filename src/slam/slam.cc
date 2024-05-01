@@ -53,6 +53,7 @@ using std::swap;
 using std::vector;
 using vector_map::VectorMap;
 
+DEFINE_int32(laserInterval, 20, "Number of lasers to use.");
 DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 
