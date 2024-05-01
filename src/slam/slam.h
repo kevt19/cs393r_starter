@@ -79,9 +79,9 @@ class SLAM {
                                    const double prev_angle,
                                    std::map<std::pair<int,int>, double> low_res_raster_map,
                                    std::map<std::pair<int,int>, double> high_res_raster_map);
-  void ClearPreviousData();
-  void SetMapPointCloud();
   void PoseGraphOptimization();
+  void SetMapPointCloud();
+  void ClearPreviousData();
 
   // Get latest robot pose.
   void GetPose(Eigen::Vector2d* loc, double* angle) const;
@@ -102,6 +102,7 @@ class SLAM {
   NonlinearFactorGraph graph_;
   Values initialGuesses_;
   std::vector<Eigen::Vector2f> map_;
+  Eigen::Vector3d latestOptimizedPose_;
 
   // constants
   double raster_map_gaussian_sigma_constant;

@@ -99,9 +99,9 @@ namespace slam
 
 
 void SLAM::GetPose(Eigen::Vector2d* loc, double* angle) const {
-  // Return the latest pose estimate of the robot.
-  *loc = Vector2d(0.0d, 0.0d);
-  *angle = 0.0f;
+  loc = &latestOptimizedPose_.head(2);
+  const double angleOut = latestOptimizedPose_.z();
+  angle = &angleOut;
 }
 
 std::map<std::pair<int,int>, double> SLAM::BuildLowResRasterMapFromHighRes(std::map<std::pair<int,int>, double> high_res_raster_map) 
@@ -458,6 +458,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       double prec_angle = prev_odom_angle_;
       Eigen::Vector3d previous_pose = Eigen::Vector3d(prev_loc_x, prev_loc_y, prec_angle);
       optimizedPoses_.push_back(previous_pose);
+      latestOptimizedPose_ = previous_pose;
       pointClouds_.push_back(point_cloud);
       vector<Eigen::Vector2d> aligned_point_cloud = AlignPointCloud(point_cloud, prev_odom_loc_, prev_odom_angle_);
       high_res_raster_maps_.push_back(BuildHighResRasterMapFromPoints(aligned_point_cloud));
@@ -483,6 +484,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
 
     for (int i = 0; i < num_new_optimized_poses; i++) {
       Eigen::Vector3d optimized_pose = all_optimized_pose_and_var[i].first;
+      latestOptimizedPose_ = optimized_pose;
       Eigen::MatrixXd optimized_var = all_optimized_pose_and_var[i].second;
       Eigen::Vector2d optimized_loc = Eigen::Vector2d(optimized_pose.x(), optimized_pose.y());  
       double optimized_angle = optimized_pose.z();
@@ -557,6 +559,9 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       std::vector<Eigen::Vector2d> updatedAlignedPointCloud = AlignPointCloud(pointClouds_[i], updatedOptimizedLoc, theta);
       alignedPointsOverPoses_[i] = updatedAlignedPointCloud; 
     }
+
+    // add last optimizedPose to current loc
+    latestOptimizedPose_ = optimizedPoses_[nNodesInGraph - 1];
 
     // update optimized poses and aligned pcs
 
