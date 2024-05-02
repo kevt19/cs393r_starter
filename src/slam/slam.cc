@@ -58,14 +58,14 @@ DEFINE_int32(nNodesBeforeSLAM, 5, "Number of nodes to add to gtsam before callin
 DEFINE_double(slam_dist_threshold, 0.25, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 DEFINE_int32(maxPointsInMap, 5000, "Maximum number of points in the map.");
-DEFINE_bool(run_pose_graph_optimization, true, "Run Pose Graph Optimization.");
-DEFINE_bool(groundTruthLocalization, true, "Use ground truth localization");
+DEFINE_bool(run_pose_graph_optimization, false, "Run Pose Graph Optimization.");
+DEFINE_bool(groundTruthLocalization, false, "Use ground truth localization");
 
 DEFINE_double(slam_min_range, 0.01, "Minimum range to keep a laser reading.");
 DEFINE_double(slam_max_range, 10.0, "Maximum range to keep a laser reading.");
 
 DEFINE_int32(slam_num_poses, 100, "Number of poses to keep for SLAM Pose Graph optimization.");
-DEFINE_int32(scan_match_timesteps, 2, "Number of previous poses / scans to optimize current pose for.");
+DEFINE_int32(scan_match_timesteps, 1, "Number of previous poses / scans to optimize current pose for.");
 
 DEFINE_double(raster_high_resolution, 0.1, "Resolution to rasterize the map to.");
 DEFINE_double(raster_low_resolution, 1.0, "Resolution to rasterize the map to.");
@@ -73,9 +73,12 @@ DEFINE_double(raster_map_gaussian_sigma, 1.0, "Sigma for rasterized map.");
 DEFINE_double(raster_min_log_prob, -3.0, "Minimum log probability for map point."); // -3.0 is equivalent to 0.001 p
 DEFINE_double(maxMapDistance, 0.5, "Maximum distance to consider for log probabilities for map point.");
 
-DEFINE_double(sigma_x, 0.05, "Sigma for x in motion model.");
-DEFINE_double(sigma_y, 0.05, "Sigma for y in motion model.");
-DEFINE_double(sigma_theta, 0.01, "Sigma for theta in motion model.");
+// DEFINE_double(sigma_x, 0.05, "Sigma for x in motion model.");
+// DEFINE_double(sigma_y, 0.05, "Sigma for y in motion model.");
+// DEFINE_double(sigma_theta, 0.01, "Sigma for theta in motion model.");
+DEFINE_double(sigma_x, 0.2, "Sigma for x in motion model.");
+DEFINE_double(sigma_y, 0.2, "Sigma for y in motion model.");
+DEFINE_double(sigma_theta, 0.05, "Sigma for theta in motion model.");
 
 DEFINE_double(VoxelDeltaAngleMin, -15.0, "Minimum size to consider for angle away.");
 DEFINE_double(VoxelDeltaAngleMax, 15.0, "Maximum size to consider for angle away.");
@@ -95,6 +98,8 @@ namespace slam
     prev_angle_ = 0.0d;
     current_loc_ = Eigen::Vector2d(0.0d, 0.0d);
     current_angle_ = 0.0d;
+    initial_loc_ = Eigen::Vector2d(0.0d, 0.0d);
+    initial_angle_ = 0.0d;
     ready_to_csm_ = false;
     location_initialized_ = false;
     usingGroundTruthLocalization_ = FLAGS_groundTruthLocalization;
@@ -112,44 +117,6 @@ void SLAM::GetPose(Eigen::Vector2d* loc, double* angle) const {
   *loc = latestOptimizedPose_.head(2);
   const double angleOut = latestOptimizedPose_.z();
   *angle = angleOut;
-}
-
-// Only used for tuning/debugging. Updates with ground-truth localization.
-void SLAM::UpdateLocation(const Eigen::Vector2f& odom_loc, const float odom_angle) {
-  double odom_loc_x = odom_loc.x();
-  double odom_loc_y = odom_loc.y();
-
-  double odom_angle_d = odom_angle;
-  Eigen::Vector2d odom_loc_d = Eigen::Vector2d(odom_loc_x, odom_loc_y);
-  current_loc_ = odom_loc_d;
-  current_angle_ = odom_angle_d;
-
-  if (!location_initialized_) {
-    prev_loc_ = odom_loc_d;
-    prev_angle_ = odom_angle_d;
-
-    current_loc_ = odom_loc_d;
-    current_angle_ = odom_angle_d;
-
-    location_initialized_ = true;
-    ready_to_csm_ = true;
-    noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Sigmas(Vector3(0.0, 0.0, 0.0));
-    graph_.add(PriorFactor<Pose2>(1, Pose2(0, 0, 0), priorNoise));
-    initialGuesses_.insert(1, Pose2(odom_loc_x, odom_loc_y, odom_angle_d));
-    printf("Initial guess %f, %f, %f\n", odom_loc_x, odom_loc_y, odom_angle_d);
-    return;
-  }
-
-  double delta_odom_x = odom_loc_x - prev_loc_.x();
-  double delta_odom_y = odom_loc_y - prev_loc_.y();
-  double delta_odom_angle = RadToDeg(odom_angle_d - prev_angle_);
-  double delta_odom_dist = sqrt(pow(delta_odom_x, 2) + pow(delta_odom_y, 2));
-  if (delta_odom_dist < FLAGS_slam_dist_threshold && fabs(delta_odom_angle) < FLAGS_slam_angle_threshold) {
-    return;
-  }
-  ready_to_csm_ = true;
-  prev_loc_ = odom_loc_d;
-  prev_angle_ = odom_angle_d;
 }
 
 std::map<std::pair<int,int>, double> SLAM::BuildLowResRasterMapFromHighRes(std::map<std::pair<int,int>, double> high_res_raster_map) 
@@ -262,6 +229,7 @@ vector<Eigen::Vector2d> SLAM::AlignPointCloud(const vector<Eigen::Vector2d>& poi
     Eigen::Vector2d point_to_transform(x, y);
     point_to_transform = R * point_to_transform;
     Eigen::Vector2d transformed_point = point_to_transform + translation + laser_offset;
+    // Eigen::Vector2d transformed_point = point_to_transform + translation + laser_offset;
     aligned_point_cloud.push_back(transformed_point);
   }
   return aligned_point_cloud;
@@ -533,7 +501,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       alignedPointsOverPoses_.push_back(aligned_point_cloud);
       Eigen::MatrixXd initial_cov = Eigen::MatrixXd::Zero(3, 3);
       optimizedPosesVariances_.push_back(initial_cov);
-      nodeIndices_.push_back(1);
+      nodeIndices_.push_back(0);
       ready_to_csm_ = false; 
       return;
     }
@@ -565,7 +533,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
     
     std::vector<std::pair<Eigen::Vector3d, Eigen::MatrixXd>> all_optimized_pose_and_var = CorrelativeScanMatching(point_cloud, estimated_loc, estimated_angle);
     int num_new_optimized_poses = all_optimized_pose_and_var.size();
-    int newNodeIdx = nNodesInGraph + 1;
+    int newNodeIdx = nNodesInGraph;
 
     // let's get the average optimized pose
     Eigen::Vector3d optimizedPoseSum = Eigen::Vector3d(0.0, 0.0, 0.0);
@@ -588,6 +556,8 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       std::map<std::pair<int,int>, double> high_res_raster_map = BuildHighResRasterMapFromPoints(aligned_point_cloud);
       std::map<std::pair<int,int>, double> low_res_raster_map = BuildLowResRasterMapFromHighRes(high_res_raster_map);
 
+      num_scans += 1;
+
       // if we have too many poses, remove the oldest one
       if (num_scans >= FLAGS_slam_num_poses) {
         pointClouds_.erase(pointClouds_.begin());
@@ -606,6 +576,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       high_res_raster_maps_.push_back(high_res_raster_map);
       low_res_raster_maps_.push_back(low_res_raster_map);
       optimizedPosesVariances_.push_back(optimized_var);
+      nodeIndices_.push_back(newNodeIdx);
       ready_to_csm_ = false; 
 
       // add to factor graph
@@ -614,19 +585,20 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       // Vector3 optimized_std_diag = Vector3(optimized_var_diag.x(), optimized_var_diag.y(), optimized_var_diag.z());
       Vector3 optimized_std_diag = Vector3(sqrt(optimized_var_diag.x()), sqrt(optimized_var_diag.y()), sqrt(optimized_var_diag.z()));
       noiseModel::Diagonal::shared_ptr stdForOptimizedPose = noiseModel::Diagonal::Sigmas(optimized_std_diag);
-      num_scans = optimizedPoses_.size();
       int otherPoseIdx = num_scans - FLAGS_scan_match_timesteps * (i + 1);
-      otherPoseIdx = std::max(otherPoseIdx, 0); // edge case of first pose
+      // otherPoseIdx = std::max(otherPoseIdx, 0); // edge case of first pose
+      if (otherPoseIdx < 0) {
+        otherPoseIdx = 0;
+      }
       Eigen::Vector3d priorPose = optimizedPoses_[otherPoseIdx];
       // printf("fo\n");
       Eigen::Vector3d deltaPose = optimized_pose - priorPose;
-      printf("Delta pose: %f, %f, %f\n", deltaPose.x(), deltaPose.y(), deltaPose.z());
+      printf("Optimized pose %f, %f, %f\n", optimized_pose.x(), optimized_pose.y(), optimized_pose.z());
       Pose2 deltaPoseForGraph = Pose2(deltaPose.x(), deltaPose.y(), deltaPose.z());
       // Pose2 optimizedPoseForGraph = Pose2(optimized_pose.x(), optimized_pose.y(), optimized_pose.z());
       // printf("before adding\n");
       int otherNodeIdx = nodeIndices_[otherPoseIdx];
       graph_.add(BetweenFactor<Pose2>(otherNodeIdx, newNodeIdx, deltaPoseForGraph, stdForOptimizedPose));
-      nodeIndices_.push_back(newNodeIdx);
       // printf("after inserting\n");
     }
     nNodesInGraph += 1; // not the same as num of edges in graph
@@ -678,27 +650,21 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
     // printf("after optimizing\n");
   }
 
-void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
-  if (usingGroundTruthLocalization_) {
-    return;
-  }
-
+void SLAM::UpdateLocation(const Eigen::Vector2d& odom_loc, const double odom_angle) {
   if (!location_initialized_) {
+    prev_loc_ = odom_loc;
     prev_angle_ = odom_angle;
-    prev_loc_ = odom_loc;    
+
     current_loc_ = odom_loc;
     current_angle_ = odom_angle;
+
     location_initialized_ = true;
     ready_to_csm_ = true;
-
     noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Sigmas(Vector3(0.0, 0.0, 0.0));
-    graph_.add(PriorFactor<Pose2>(1, Pose2(0, 0, 0), priorNoise));
-    initialGuesses_.insert(1, Pose2(odom_loc.x(), odom_loc.y(), odom_angle));
+    graph_.add(PriorFactor<Pose2>(0, Pose2(0, 0, 0), priorNoise));
+    initialGuesses_.insert(0, Pose2(odom_loc.x(), odom_loc.y(), odom_angle));
     return;
   }
-
-  current_loc_ = odom_loc;
-  current_angle_ = odom_angle;
 
   double delta_odom_x = odom_loc.x() - prev_loc_.x();
   double delta_odom_y = odom_loc.y() - prev_loc_.y();
@@ -710,6 +676,42 @@ void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
   ready_to_csm_ = true;
   prev_loc_ = odom_loc;
   prev_angle_ = odom_angle;
+}
+
+void SLAM::ObserveLocalization(const Eigen::Vector2f& odom_loc, const float odom_angle) {
+  double odom_loc_x = odom_loc.x();
+  double odom_loc_y = odom_loc.y();
+
+  double odom_angle_d = odom_angle;
+  Eigen::Vector2d odom_loc_d = Eigen::Vector2d(odom_loc_x, odom_loc_y);
+  current_loc_ = odom_loc_d;
+  current_angle_ = odom_angle_d;
+
+  UpdateLocation(odom_loc_d, odom_angle_d);
+}
+
+void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
+  if (usingGroundTruthLocalization_) {
+    return;
+  }
+
+  Eigen::Vector2d odom_loc_out = odom_loc;
+  double odom_angle_out = odom_angle;
+
+  if (!location_initialized_) {
+    initial_loc_ = odom_loc;
+    initial_angle_ = odom_angle;
+    odom_loc_out = Eigen::Vector2d(0.0, 0.0);
+    odom_angle_out = 0.0;
+  }
+  else
+  {
+    odom_loc_out = odom_loc - initial_loc_;
+    odom_angle_out = AngleDiff(odom_angle, initial_angle_);
+  }
+
+  UpdateLocation(odom_loc_out, odom_angle_out);
+  // UpdateLocation(odom_loc, odom_angle);
 }
 
 void SLAM::ClearPreviousData() {
@@ -737,9 +739,9 @@ void SLAM::ClearPreviousData() {
 
   // add prior factor
   noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Sigmas(optimized_std_diag);
-  nodeIndices_[0] = 1;
-  graph_.add(PriorFactor<Pose2>(1, Pose2(0, 0, 0), priorNoise));
-  initialGuesses_.insert(1, Pose2(optimized_pose.x(), optimized_pose.y(), optimized_pose.z()));
+  nodeIndices_[0] = 0;
+  graph_.add(PriorFactor<Pose2>(0, Pose2(0, 0, 0), priorNoise));
+  initialGuesses_.insert(0, Pose2(optimized_pose.x(), optimized_pose.y(), optimized_pose.z()));
 }
 
 void SLAM::SetMapPointCloud() {

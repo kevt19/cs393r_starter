@@ -103,7 +103,6 @@ void PublishMap() {
   ClearVisualizationMsg(vis_msg_);
 
   const vector<Vector2f> map = slam_.GetMap();
-  printf("Map: %lu points\n", map.size());
   for (const Vector2f& p : map) {
     visualization::DrawPoint(p, 0xFF0000, vis_msg_);
   }
@@ -127,7 +126,7 @@ void PublishPose() {
 /// Just used for tuning/debugging. Ground truth localization.
 void LocalizationCallback(const amrl_msgs::Localization2DMsg msg) {
   if (slam_.usingGroundTruthLocalization_) {
-    slam_.UpdateLocation(Vector2f(msg.pose.x, msg.pose.y), msg.pose.theta);
+    slam_.ObserveLocalization(Vector2f(msg.pose.x, msg.pose.y), msg.pose.theta);
   }
 }
 

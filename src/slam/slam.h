@@ -79,7 +79,8 @@ class SLAM {
                                    const double prev_angle,
                                    std::map<std::pair<int,int>, double> low_res_raster_map,
                                    std::map<std::pair<int,int>, double> high_res_raster_map);
-  void UpdateLocation(const Eigen::Vector2f& odom_loc, const float odom_angle);
+  void UpdateLocation(const Eigen::Vector2d& odom_loc, const double odom_angle);
+  void ObserveLocalization(const Eigen::Vector2f& odom_loc, const float odom_angle);
   void PoseGraphOptimization();
   void SetMapPointCloud();
   void ClearPreviousData();
@@ -95,6 +96,8 @@ class SLAM {
   double prev_angle_;
   Eigen::Vector2d current_loc_;
   double current_angle_;
+  Eigen::Vector2d initial_loc_;
+  double initial_angle_;
   bool ready_to_csm_;
   bool location_initialized_;
   std::vector<std::map<std::pair<int,int>, double>> high_res_raster_maps_;
