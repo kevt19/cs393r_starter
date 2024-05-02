@@ -54,12 +54,12 @@ using std::vector;
 using vector_map::VectorMap;
 
 DEFINE_int32(laserInterval, 25, "Number of intervals between lasers.");
-DEFINE_int32(nNodesBeforeSLAM, 5, "Number of nodes to add to gtsam before calling optimize.");
+DEFINE_int32(nNodesBeforeSLAM, 1, "Number of nodes to add to gtsam before calling optimize.");
 DEFINE_double(slam_dist_threshold, 0.25, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 DEFINE_int32(maxPointsInMap, 5000, "Maximum number of points in the map.");
 DEFINE_bool(run_pose_graph_optimization, false, "Run Pose Graph Optimization.");
-DEFINE_bool(groundTruthLocalization, false, "Use ground truth localization");
+DEFINE_bool(groundTruthLocalization, true, "Use ground truth localization");
 
 DEFINE_double(slam_min_range, 0.01, "Minimum range to keep a laser reading.");
 DEFINE_double(slam_max_range, 10.0, "Maximum range to keep a laser reading.");
@@ -593,7 +593,6 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       Eigen::Vector3d priorPose = optimizedPoses_[otherPoseIdx];
       // printf("fo\n");
       Eigen::Vector3d deltaPose = optimized_pose - priorPose;
-      printf("Optimized pose %f, %f, %f\n", optimized_pose.x(), optimized_pose.y(), optimized_pose.z());
       Pose2 deltaPoseForGraph = Pose2(deltaPose.x(), deltaPose.y(), deltaPose.z());
       // Pose2 optimizedPoseForGraph = Pose2(optimized_pose.x(), optimized_pose.y(), optimized_pose.z());
       // printf("before adding\n");
@@ -670,6 +669,8 @@ void SLAM::UpdateLocation(const Eigen::Vector2d& odom_loc, const double odom_ang
   double delta_odom_y = odom_loc.y() - prev_loc_.y();
   double delta_odom_angle = RadToDeg(odom_angle - prev_angle_);
   double delta_odom_dist = sqrt(pow(delta_odom_x, 2) + pow(delta_odom_y, 2));
+  current_loc_ = odom_loc;
+  current_angle_ = odom_angle;
   if (delta_odom_dist < FLAGS_slam_dist_threshold && fabs(delta_odom_angle) < FLAGS_slam_angle_threshold) {
     return;
   }
@@ -695,23 +696,23 @@ void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
     return;
   }
 
-  Eigen::Vector2d odom_loc_out = odom_loc;
-  double odom_angle_out = odom_angle;
+  // Eigen::Vector2d odom_loc_out = odom_loc;
+  // double odom_angle_out = odom_angle;
 
-  if (!location_initialized_) {
-    initial_loc_ = odom_loc;
-    initial_angle_ = odom_angle;
-    odom_loc_out = Eigen::Vector2d(0.0, 0.0);
-    odom_angle_out = 0.0;
-  }
-  else
-  {
-    odom_loc_out = odom_loc - initial_loc_;
-    odom_angle_out = AngleDiff(odom_angle, initial_angle_);
-  }
+  // if (!location_initialized_) {
+  //   initial_loc_ = odom_loc;
+  //   initial_angle_ = odom_angle;
+  //   odom_loc_out = Eigen::Vector2d(0.0, 0.0);
+  //   odom_angle_out = 0.0;
+  // }
+  // else
+  // {
+  //   odom_loc_out = odom_loc - initial_loc_;
+  //   odom_angle_out = AngleDiff(odom_angle, initial_angle_);
+  // }
 
-  UpdateLocation(odom_loc_out, odom_angle_out);
-  // UpdateLocation(odom_loc, odom_angle);
+  // UpdateLocation(odom_loc_out, odom_angle_out);
+  UpdateLocation(odom_loc, odom_angle);
 }
 
 void SLAM::ClearPreviousData() {
