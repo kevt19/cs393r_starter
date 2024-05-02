@@ -9,6 +9,10 @@ RUN apt-get update && \
 
 # install ros apt deps
 RUN apt-get install -y ros-noetic-tf ros-noetic-angles
+RUN apt-get install -y software-properties-common
+RUN add-apt-repository ppa:borglab/gtsam-release-4.0
+RUN apt install -y libgtsam-dev libgtsam-unstable-dev
+
 
 ARG HOST_UID
 RUN useradd dev -m -s /bin/bash -u $HOST_UID -G sudo

@@ -51,6 +51,8 @@
 #include "vector_map/vector_map.h"
 #include "visualization/visualization.h"
 
+
+
 using amrl_msgs::VisualizationMsg;
 using geometry::line2f;
 using geometry::Line;
@@ -59,6 +61,7 @@ using math_util::RadToDeg;
 using ros::Time;
 using std::string;
 using std::vector;
+using Eigen::Vector2d;
 using Eigen::Vector2f;
 using visualization::ClearVisualizationMsg;
 using visualization::DrawArc;
@@ -69,6 +72,8 @@ using visualization::DrawParticle;
 // Create command line arguements
 DEFINE_string(laser_topic, "/scan", "Name of ROS topic for LIDAR data");
 DEFINE_string(odom_topic, "/odom", "Name of ROS topic for odometry data");
+DEFINE_string(loc_topic, "localization", "Name of ROS topic for localization");
+DEFINE_bool(publishPose, false, "Publish the pose of the robot");
 
 DECLARE_int32(v);
 
@@ -98,22 +103,31 @@ void PublishMap() {
   ClearVisualizationMsg(vis_msg_);
 
   const vector<Vector2f> map = slam_.GetMap();
-  printf("Map: %lu points\n", map.size());
   for (const Vector2f& p : map) {
-    visualization::DrawPoint(p, 0xC0C0C0, vis_msg_);
+    visualization::DrawPoint(p, 0xFF0000, vis_msg_);
   }
   visualization_publisher_.publish(vis_msg_);
 }
 
 void PublishPose() {
-  Vector2f robot_loc(0, 0);
-  float robot_angle(0);
+  if (!FLAGS_publishPose) {
+    return;
+  }
+  Vector2d robot_loc(0, 0);
+  double robot_angle(0);
   slam_.GetPose(&robot_loc, &robot_angle);
   amrl_msgs::Localization2DMsg localization_msg;
   localization_msg.pose.x = robot_loc.x();
   localization_msg.pose.y = robot_loc.y();
   localization_msg.pose.theta = robot_angle;
   localization_publisher_.publish(localization_msg);
+}
+
+/// Just used for tuning/debugging. Ground truth localization.
+void LocalizationCallback(const amrl_msgs::Localization2DMsg msg) {
+  if (slam_.usingGroundTruthLocalization_) {
+    slam_.ObserveLocalization(Vector2f(msg.pose.x, msg.pose.y), msg.pose.theta);
+  }
 }
 
 void LaserCallback(const sensor_msgs::LaserScan& msg) {
@@ -135,8 +149,8 @@ void OdometryCallback(const nav_msgs::Odometry& msg) {
   if (FLAGS_v > 0) {
     printf("Odometry t=%f\n", msg.header.stamp.toSec());
   }
-  const Vector2f odom_loc(msg.pose.pose.position.x, msg.pose.pose.position.y);
-  const float odom_angle =
+  const Vector2d odom_loc(msg.pose.pose.position.x, msg.pose.pose.position.y);
+  const double odom_angle =
       2.0 * atan2(msg.pose.pose.orientation.z, msg.pose.pose.orientation.w);
   slam_.ObserveOdometry(odom_loc, odom_angle);
 }
@@ -158,6 +172,8 @@ int main(int argc, char** argv) {
       FLAGS_laser_topic.c_str(),
       1,
       LaserCallback);
+  ros::Subscriber localization_sub =
+      n.subscribe(FLAGS_loc_topic, 1, &LocalizationCallback);
   ros::Subscriber odom_sub = n.subscribe(
       FLAGS_odom_topic.c_str(),
       1,
