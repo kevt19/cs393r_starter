@@ -60,14 +60,14 @@ DEFINE_int32(nNodesBeforeSLAM, 5, "Number of nodes to add to gtsam before callin
 DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 DEFINE_int32(maxPointsInMap, 5000, "Maximum number of points in the map.");
-DEFINE_bool(run_pose_graph_optimization, false, "Run Pose Graph Optimization.");
+DEFINE_bool(run_pose_graph_optimization, true, "Run Pose Graph Optimization.");
 DEFINE_bool(groundTruthLocalization, false, "Use ground truth localization");
 
 DEFINE_double(slam_min_range, 0.01, "Minimum range to keep a laser reading.");
 DEFINE_double(slam_max_range, 10.0, "Maximum range to keep a laser reading.");
 
 DEFINE_int32(slam_num_poses, 100, "Number of poses to keep for SLAM Pose Graph optimization.");
-DEFINE_int32(scan_match_timesteps, 1, "Number of previous poses / scans to optimize current pose for.");
+DEFINE_int32(scan_match_timesteps, 3, "Number of previous poses / scans to optimize current pose for.");
 
 DEFINE_double(raster_high_resolution, 0.1, "Resolution to rasterize the map to.");
 DEFINE_double(raster_low_resolution, 1.0, "Resolution to rasterize the map to.");
