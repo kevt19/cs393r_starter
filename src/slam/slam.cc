@@ -40,6 +40,7 @@ using namespace gtsam;
 
 using namespace math_util;
 using Eigen::Affine2f;
+using geometry::line2f;
 using Eigen::Rotation2Df;
 using Eigen::Translation2f;
 using Eigen::Vector2d;
@@ -58,6 +59,7 @@ DEFINE_int32(nNodesBeforeSLAM, 5, "Number of nodes to add to gtsam before callin
 DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 DEFINE_int32(maxPointsInMap, 5000, "Maximum number of points in the map.");
+DEFINE_string(map_output, "map.txt", "Output file for map.");
 DEFINE_bool(run_pose_graph_optimization, true, "Run Pose Graph Optimization.");
 DEFINE_bool(groundTruthLocalization, false, "Use ground truth localization");
 
@@ -76,9 +78,6 @@ DEFINE_double(maxMapDistance, 0.5, "Maximum distance to consider for log probabi
 DEFINE_double(sigma_x, 0.05, "Sigma for x in motion model.");
 DEFINE_double(sigma_y, 0.05, "Sigma for y in motion model.");
 DEFINE_double(sigma_theta, 0.01, "Sigma for theta in motion model.");
-// DEFINE_double(sigma_x, 0.2, "Sigma for x in motion model.");
-// DEFINE_double(sigma_y, 0.2, "Sigma for y in motion model.");
-// DEFINE_double(sigma_theta, 0.05, "Sigma for theta in motion model.");
 
 DEFINE_double(VoxelDeltaAngleMin, -15.0, "Minimum size to consider for angle away.");
 DEFINE_double(VoxelDeltaAngleMax, 15.0, "Maximum size to consider for angle away.");
@@ -103,6 +102,8 @@ namespace slam
     ready_to_csm_ = false;
     location_initialized_ = false;
     usingGroundTruthLocalization_ = FLAGS_groundTruthLocalization;
+    mapFilepath_ = FLAGS_map_output;
+    FormatAndSaveMap(); // save a blank map
 
     // constants
     raster_map_gaussian_sigma_constant = 2*pow(FLAGS_raster_map_gaussian_sigma, 2);
@@ -503,30 +504,13 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       optimizedPosesVariances_.push_back(initial_cov);
       nodeIndices_.push_back(0);
       ready_to_csm_ = false; 
+      SetMapPointCloud();
       return;
     }
 
     if (!ready_to_csm_) {
       return;
     }
-
-    // first estimate position by relating to previous loc
-    // Eigen::Vector3d prev_optimized_pose = optimizedPoses_[num_scans - 1];
-    // Eigen::Vector2d prev_optimized_loc = Eigen::Vector2d(prev_optimized_pose.x(), prev_optimized_pose.y());
-    // double prev_optimized_angle = prev_optimized_pose.z();
-// 
-    // Eigen::Vector3d prev_odometry_pose = odometryPoses_[num_scans - 1];
-    // Eigen::Vector2d prev_odometry_loc = Eigen::Vector2d(prev_odometry_pose.x(), prev_odometry_pose.y());
-    // double prev_odometry_angle = prev_odometry_pose.z();
-// 
-    // double delta_odom_x = current_loc_.x() - prev_odometry_loc.x();
-    // double delta_odom_y = current_loc_.y() - prev_odometry_loc.y();
-    // double delta_odom_angle = current_angle_ - prev_odometry_angle;
-// 
-    // double estimated_x = prev_optimized_loc.x() + delta_odom_x;
-    // double estimated_y = prev_optimized_loc.y() + delta_odom_y;
-    // double estimated_angle = prev_optimized_angle + delta_odom_angle; 
-    // Eigen::Vector2d estimated_loc = Eigen::Vector2d(estimated_x, estimated_y);
 
     Eigen::Vector2d estimated_loc = current_loc_;
     double estimated_angle = current_angle_;
@@ -580,25 +564,18 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       ready_to_csm_ = false; 
 
       // add to factor graph
-      // printf("sTart\n");
       Eigen::Vector3d optimized_var_diag = optimized_var.diagonal();
-      // Vector3 optimized_std_diag = Vector3(optimized_var_diag.x(), optimized_var_diag.y(), optimized_var_diag.z());
       Vector3 optimized_std_diag = Vector3(sqrt(optimized_var_diag.x()), sqrt(optimized_var_diag.y()), sqrt(optimized_var_diag.z()));
       noiseModel::Diagonal::shared_ptr stdForOptimizedPose = noiseModel::Diagonal::Sigmas(optimized_std_diag);
       int otherPoseIdx = num_scans - FLAGS_scan_match_timesteps * (i + 1);
-      // otherPoseIdx = std::max(otherPoseIdx, 0); // edge case of first pose
       if (otherPoseIdx < 0) {
         otherPoseIdx = 0;
       }
       Eigen::Vector3d priorPose = optimizedPoses_[otherPoseIdx];
-      // printf("fo\n");
       Eigen::Vector3d deltaPose = optimized_pose - priorPose;
       Pose2 deltaPoseForGraph = Pose2(deltaPose.x(), deltaPose.y(), deltaPose.z());
-      // Pose2 optimizedPoseForGraph = Pose2(optimized_pose.x(), optimized_pose.y(), optimized_pose.z());
-      // printf("before adding\n");
       int otherNodeIdx = nodeIndices_[otherPoseIdx];
       graph_.add(BetweenFactor<Pose2>(otherNodeIdx, newNodeIdx, deltaPoseForGraph, stdForOptimizedPose));
-      // printf("after inserting\n");
     }
     nNodesInGraph += 1; // not the same as num of edges in graph
 
@@ -623,9 +600,6 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       double x = result.at<Pose2>(nodeIdx).x();
       double y = result.at<Pose2>(nodeIdx).y();
       double theta = result.at<Pose2>(nodeIdx).theta();
-      // printf("initial guess %f, %f", initialGuesses_.at<Pose2>(i).x(), initialGuesses_.at<Pose2>(i).y());
-      // printf("optimized loc %f, %f", optimizedPoses_[i].x(), optimizedPoses_[i].y());
-      // printf("updated optimized loc %f, %f", x, y);
 
       Eigen::Vector3d updatedOptimizedPose = Eigen::Vector3d(x, y, theta);
       Eigen::Vector2d updatedOptimizedLoc = Eigen::Vector2d(x, y);
@@ -633,20 +607,10 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       // update our vector
       optimizedPoses_[i] = updatedOptimizedPose;
       // update aligned point clouds
-
-      // printf("Old optimized pose %f, %f, %f\n", optimizedPoses_[i].x(), optimizedPoses_[i].y(), optimizedPoses_[i].z());
-      // printf("New optimized pose %f, %f, %f\n", updatedOptimizedPose.x(), updatedOptimizedPose.y(), updatedOptimizedPose.z());
       
       std::vector<Eigen::Vector2d> updatedAlignedPointCloud = AlignPointCloud(pointClouds_[i], updatedOptimizedLoc, theta);
       alignedPointsOverPoses_[i] = alignedPointsOverPoses_[i]; 
     }
-
-    // add last optimizedPose to current loc
-    // latestOptimizedPose_ = optimizedPoses_[nNodesInGraph - 1];
-
-    // update optimized poses and aligned pcs
-
-    // printf("after optimizing\n");
   }
 
 void SLAM::UpdateLocation(const Eigen::Vector2d& odom_loc, const double odom_angle) {
@@ -695,23 +659,6 @@ void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
   if (usingGroundTruthLocalization_) {
     return;
   }
-
-  // Eigen::Vector2d odom_loc_out = odom_loc;
-  // double odom_angle_out = odom_angle;
-
-  // if (!location_initialized_) {
-  //   initial_loc_ = odom_loc;
-  //   initial_angle_ = odom_angle;
-  //   odom_loc_out = Eigen::Vector2d(0.0, 0.0);
-  //   odom_angle_out = 0.0;
-  // }
-  // else
-  // {
-  //   odom_loc_out = odom_loc - initial_loc_;
-  //   odom_angle_out = AngleDiff(odom_angle, initial_angle_);
-  // }
-
-  // UpdateLocation(odom_loc_out, odom_angle_out);
   UpdateLocation(odom_loc, odom_angle);
 }
 
@@ -733,7 +680,6 @@ void SLAM::ClearPreviousData() {
   nNodesInGraph = 1;
 
   Eigen::Vector3d optimized_pose = optimizedPoses_[0];
-  // Vector3 optimized_std_diag = Vector3(optimized_var_diag.x(), optimized_var_diag.y(), optimized_var_diag.z());
   Eigen::MatrixXd optimized_var = optimizedPosesVariances_[0];
   Eigen::Vector3d optimized_var_diag = optimized_var.diagonal();
   Eigen::Vector3d optimized_std_diag = Vector3(sqrt(optimized_var_diag.x()), sqrt(optimized_var_diag.y()), sqrt(optimized_var_diag.z()));
@@ -771,10 +717,62 @@ void SLAM::SetMapPointCloud() {
       nPointsInMap++;
     }
   }
+  FormatAndSaveMap();
 }
 
 vector<Vector2f> SLAM::GetMap() {
   return map_;
+}
+
+void SLAM::FormatAndSaveMap() {
+  // Save the map as a vector map
+  vector_map::VectorMap vector_map = TransformPointCloudMapToVectorMap();
+  vector_map.Save(mapFilepath_);
+}
+
+vector_map::VectorMap SLAM::TransformPointCloudMapToVectorMap() {
+  // find nearest neighbor and form a line if the distance is less than a threshold
+  printf("Transforming point cloud map to vector map");
+  vector_map::VectorMap vector_map;
+  // first sort by x-axis
+  std::sort(map_.begin(), map_.end(), [](const Eigen::Vector2f& a, const Eigen::Vector2f& b) {
+    return a.x() < b.x();
+  });
+
+  int num_points = map_.size();
+  // double loop to find nearest neighbor
+  for (int i = 0; i < num_points; i++)
+  {
+    Eigen::Vector2f point = map_[i];
+    double x = point.x();
+    double y = point.y();
+    double min_dist = 100000.0;
+    int min_idx = -1;
+    for (int j = i + 1; j < num_points; j++)
+    {
+      Eigen::Vector2f other_point = map_[j];
+      double other_x = other_point.x();
+      double other_y = other_point.y();
+      double dist = sqrt(pow(x - other_x, 2) + pow(y - other_y, 2));
+      if (dist < min_dist) {
+        min_dist = dist;
+        min_idx = j;
+      }
+      else
+      {
+        break;
+      }
+    }
+    if (min_dist < FLAGS_maxMapDistance) 
+    {
+      Eigen::Vector2f other_point = map_[min_idx];
+      line2f line(point, other_point);
+      vector_map.lines.push_back(line);
+      break;
+    }
+  }
+  printf("Finished transforming point cloud map to vector map\n");
+  return vector_map;
 }
 
 }  // namespace slam

@@ -51,6 +51,8 @@ using namespace ros_helpers;
 DEFINE_double(resolution, 0.25, "Global Planner Cell resolution");
 DEFINE_double(max_wall_margin, 0.75, "Maximum margin to consider for walls");
 
+DEFINE_bool(usingSlamMap, true, "Use the slam map for navigation");
+
 namespace
 {
   ros::Publisher drive_pub_;
@@ -94,7 +96,11 @@ namespace navigation
                                                                        SYSTEM_LATENCY_(0.23),
                                                                        OBSTACLE_MARGIN_(0.1)
   {
-    map_.Load(GetMapFileFromName(map_name));
+    if (!FLAGS_usingSlamMap)
+    {
+      map_.Load(GetMapFileFromName(map_name));
+    }
+    last_map_update_time_ = GetWallTime();
     drive_pub_ = n->advertise<AckermannCurvatureDriveMsg>(
         "ackermann_curvature_drive", 1);
     viz_pub_ = n->advertise<VisualizationMsg>("visualization", 1);
@@ -103,6 +109,16 @@ namespace navigation
     global_viz_msg_ = visualization::NewVisualizationMessage(
         "map", "navigation_global");
     InitRosHeader("base_link", &drive_msg_.header);
+  }
+
+  void Navigation::ReloadMap(std::string map_name)
+  {
+    map_.Load(map_name); // also need to replan
+    if (waypoints.size() > 0)
+    {
+      nav_goal_loc_ = waypoints[waypoints.size() - 1];
+      SetNavGoal(nav_goal_loc_, nav_goal_angle_);
+    }
   }
 
   std::vector<Eigen::Vector2f> Navigation::GetNeighborhoodOfWallPoints(

@@ -51,8 +51,6 @@
 #include "vector_map/vector_map.h"
 #include "visualization/visualization.h"
 
-
-
 using amrl_msgs::VisualizationMsg;
 using geometry::line2f;
 using geometry::Line;
@@ -120,6 +118,7 @@ void PublishPose() {
   localization_msg.pose.x = robot_loc.x();
   localization_msg.pose.y = robot_loc.y();
   localization_msg.pose.theta = robot_angle;
+  localization_msg.map = slam_.mapFilepath_;
   localization_publisher_.publish(localization_msg);
 }
 

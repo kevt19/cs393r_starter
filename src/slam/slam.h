@@ -63,6 +63,8 @@ class SLAM {
 
   // Get latest map.
   std::vector<Eigen::Vector2f> GetMap();
+  void FormatAndSaveMap();
+  vector_map::VectorMap TransformPointCloudMapToVectorMap();
   std::map<std::pair<int,int>, double> BuildLowResRasterMapFromHighRes(std::map<std::pair<int,int>, double> high_res_raster_map); 
   std::map<std::pair<int,int>, double> BuildHighResRasterMapFromPoints(const std::vector<Eigen::Vector2d> &alignedPoints);
   std::map<std::pair<int,int>, double> BuildHighResRasterMapFromMap(const VectorMap& map);
@@ -88,6 +90,7 @@ class SLAM {
   // Get latest robot pose.
   void GetPose(Eigen::Vector2d* loc, double* angle) const;
   bool usingGroundTruthLocalization_;
+  std::string mapFilepath_;
 
 
  private:

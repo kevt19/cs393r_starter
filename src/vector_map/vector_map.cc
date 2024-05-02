@@ -385,6 +385,18 @@ void VectorMap::Load(const string& file) {
   file_name = file;
 }
 
+void VectorMap::Save(const std::string& file) const {
+  FILE* fid = fopen(file.c_str(), "w");
+  if (fid == NULL) {
+    fprintf(stderr, "ERROR: Unable to save map %s\n", file.c_str());
+    exit(1);
+  }
+  for (const line2f& l : lines) {
+    fprintf(fid, "%f,%f,%f,%f\n", l.p0.x(), l.p0.y(), l.p1.x(), l.p1.y());
+  }
+  fclose(fid);
+}
+
 bool VectorMap::Intersects(const Vector2f& v0, const Vector2f& v1) const {
   for (const line2f& l : lines) {
     if (l.Intersects(v0, v1)) return true;
