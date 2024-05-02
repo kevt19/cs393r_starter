@@ -612,7 +612,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       // printf("sTart\n");
       Eigen::Vector3d optimized_var_diag = optimized_var.diagonal();
       // Vector3 optimized_std_diag = Vector3(optimized_var_diag.x(), optimized_var_diag.y(), optimized_var_diag.z());
-      Vector3 optimized_std_diag = Vector3(optimized_var_diag.x() * 0.0, optimized_var_diag.y() * 0.0, optimized_var_diag.z() * 0.0);
+      Vector3 optimized_std_diag = Vector3(sqrt(optimized_var_diag.x()), sqrt(optimized_var_diag.y()), sqrt(optimized_var_diag.z()));
       noiseModel::Diagonal::shared_ptr stdForOptimizedPose = noiseModel::Diagonal::Sigmas(optimized_std_diag);
       num_scans = optimizedPoses_.size();
       int otherPoseIdx = num_scans - FLAGS_scan_match_timesteps * (i + 1);
@@ -733,7 +733,7 @@ void SLAM::ClearPreviousData() {
   // Vector3 optimized_std_diag = Vector3(optimized_var_diag.x(), optimized_var_diag.y(), optimized_var_diag.z());
   Eigen::MatrixXd optimized_var = optimizedPosesVariances_[0];
   Eigen::Vector3d optimized_var_diag = optimized_var.diagonal();
-  Eigen::Vector3d optimized_std_diag = Vector3(optimized_var_diag.x() * 0.0, optimized_var_diag.y() * 0.0, optimized_var_diag.z() * 0.0);
+  Eigen::Vector3d optimized_std_diag = Vector3(sqrt(optimized_var_diag.x()), sqrt(optimized_var_diag.y()), sqrt(optimized_var_diag.z()));
 
   // add prior factor
   noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Sigmas(optimized_std_diag);
