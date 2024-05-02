@@ -51,8 +51,6 @@
 #include "vector_map/vector_map.h"
 #include "visualization/visualization.h"
 
-
-
 using amrl_msgs::VisualizationMsg;
 using geometry::line2f;
 using geometry::Line;
@@ -73,7 +71,7 @@ using visualization::DrawParticle;
 DEFINE_string(laser_topic, "/scan", "Name of ROS topic for LIDAR data");
 DEFINE_string(odom_topic, "/odom", "Name of ROS topic for odometry data");
 DEFINE_string(loc_topic, "localization", "Name of ROS topic for localization");
-DEFINE_bool(publishPose, false, "Publish the pose of the robot");
+DEFINE_bool(publishPose, true, "Publish the pose of the robot");
 
 DECLARE_int32(v);
 
@@ -120,6 +118,7 @@ void PublishPose() {
   localization_msg.pose.x = robot_loc.x();
   localization_msg.pose.y = robot_loc.y();
   localization_msg.pose.theta = robot_angle;
+  localization_msg.map = slam_.mapFilepath_;
   localization_publisher_.publish(localization_msg);
 }
 

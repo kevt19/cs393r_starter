@@ -79,6 +79,8 @@ class Navigation {
   Eigen::Vector2f GetCarrot(std::vector<Eigen::Vector2f> global_plan, const Eigen::Vector2f r_loc, float r_angle, size_t start_waypoint_idx);
   void ObstacleDetector();
   void LocalObstacleAvoidance();
+  void ReloadMap(std::string map_name);
+  double last_map_update_time_;
 
 
  private:
@@ -121,7 +123,6 @@ class Navigation {
   float nav_goal_angle_;
   // Map of the environment.
   vector_map::VectorMap map_;
-
 
   // Car parameters
   const float ROBOT_WIDTH_;

@@ -35,13 +35,20 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/PriorFactor.h>
 
-using namespace gtsam;
+#include "ros/ros.h"
+#include "ros/package.h"
 
+using namespace gtsam;
+// using namespace ros_helpers;
 
 using vector_map::VectorMap;
 
 #ifndef SRC_SLAM_H_
 #define SRC_SLAM_H_
+
+namespace ros {
+  class NodeHandle;
+}  // namespace ros
 
 namespace slam {
 
@@ -61,8 +68,25 @@ class SLAM {
   void ObserveOdometry(const Eigen::Vector2d& odom_loc,
                        const double odom_angle);
 
+
+  std::string GetMapFileFromName(const std::string &map)
+  {
+    std::string maps_dir_ = ros::package::getPath("amrl_maps");
+    std::string outputFilepath = maps_dir_ + "/" + map + "/" + map + ".vectormap.txt";
+    // Create folder if it does not exist
+    std::string command = "mkdir -p " + maps_dir_ + "/" + map;
+    int returnVal = system(command.c_str());
+    if (returnVal != 0)
+    {
+      ROS_ERROR("Error creating directory for map file");
+    }
+    return outputFilepath;
+  }
+
   // Get latest map.
   std::vector<Eigen::Vector2f> GetMap();
+  void FormatAndSaveMap();
+  vector_map::VectorMap TransformPointCloudMapToVectorMap();
   std::map<std::pair<int,int>, double> BuildLowResRasterMapFromHighRes(std::map<std::pair<int,int>, double> high_res_raster_map); 
   std::map<std::pair<int,int>, double> BuildHighResRasterMapFromPoints(const std::vector<Eigen::Vector2d> &alignedPoints);
   std::map<std::pair<int,int>, double> BuildHighResRasterMapFromMap(const VectorMap& map);
@@ -88,7 +112,7 @@ class SLAM {
   // Get latest robot pose.
   void GetPose(Eigen::Vector2d* loc, double* angle) const;
   bool usingGroundTruthLocalization_;
-
+  std::string mapFilepath_ = GetMapFileFromName("slam");
 
  private:
   // Previous odometry-reported locations.

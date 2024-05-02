@@ -72,6 +72,7 @@ DEFINE_string(init_topic,
               "initialpose",
               "Name of ROS topic for initialization");
 DEFINE_string(map, "GDC1", "Name of vector map file");
+DEFINE_double(mapReloadTime, 5.0, "Time to reload the map"); // every 5 seconds
 
 bool run_ = true;
 sensor_msgs::LaserScan last_laser_msg_;
@@ -133,6 +134,12 @@ void LocalizationCallback(const amrl_msgs::Localization2DMsg msg) {
     printf("Localization t=%f\n", GetWallTime());
   }
   navigation_->UpdateLocation(Vector2f(msg.pose.x, msg.pose.y), msg.pose.theta);
+  // check if it's time to update our slam map
+  if (GetWallTime() - navigation_->last_map_update_time_ > FLAGS_mapReloadTime) {
+    navigation_->ReloadMap(msg.map);
+    navigation_->last_map_update_time_ = GetWallTime();
+  }
+
 }
 
 void StringCallback(const std_msgs::String& msg) {
