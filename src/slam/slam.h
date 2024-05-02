@@ -90,7 +90,7 @@ class SLAM {
   // Get latest robot pose.
   void GetPose(Eigen::Vector2d* loc, double* angle) const;
   bool usingGroundTruthLocalization_;
-  std::string mapFilepath_;
+  std::string mapFilepath_ = "slam.vectormap.txt";
 
 
  private:

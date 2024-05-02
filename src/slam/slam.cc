@@ -59,9 +59,8 @@ DEFINE_int32(nNodesBeforeSLAM, 5, "Number of nodes to add to gtsam before callin
 DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 DEFINE_int32(maxPointsInMap, 5000, "Maximum number of points in the map.");
-DEFINE_string(map_output, "map.txt", "Output file for map.");
 DEFINE_bool(run_pose_graph_optimization, true, "Run Pose Graph Optimization.");
-DEFINE_bool(groundTruthLocalization, false, "Use ground truth localization");
+DEFINE_bool(groundTruthLocalization, true, "Use ground truth localization");
 
 DEFINE_double(slam_min_range, 0.01, "Minimum range to keep a laser reading.");
 DEFINE_double(slam_max_range, 10.0, "Maximum range to keep a laser reading.");
@@ -102,7 +101,6 @@ namespace slam
     ready_to_csm_ = false;
     location_initialized_ = false;
     usingGroundTruthLocalization_ = FLAGS_groundTruthLocalization;
-    mapFilepath_ = FLAGS_map_output;
     FormatAndSaveMap(); // save a blank map
 
     // constants
@@ -488,6 +486,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
     // if this is the first scan, let's save it and return
     int num_scans = alignedPointsOverPoses_.size();
     if (ready_to_csm_ && num_scans == 0) {
+      printf("num scans: %d\n", num_scans);
       double prev_loc_x = prev_loc_.x();
       double prev_loc_y = prev_loc_.y();
       double prec_angle = prev_angle_;
@@ -732,8 +731,7 @@ void SLAM::FormatAndSaveMap() {
 
 vector_map::VectorMap SLAM::TransformPointCloudMapToVectorMap() {
   // find nearest neighbor and form a line if the distance is less than a threshold
-  printf("Transforming point cloud map to vector map");
-  vector_map::VectorMap vector_map;
+  vector_map::VectorMap vector_map = vector_map::VectorMap();
   // first sort by x-axis
   std::sort(map_.begin(), map_.end(), [](const Eigen::Vector2f& a, const Eigen::Vector2f& b) {
     return a.x() < b.x();
@@ -758,20 +756,14 @@ vector_map::VectorMap SLAM::TransformPointCloudMapToVectorMap() {
         min_dist = dist;
         min_idx = j;
       }
-      else
-      {
-        break;
-      }
     }
     if (min_dist < FLAGS_maxMapDistance) 
     {
       Eigen::Vector2f other_point = map_[min_idx];
       line2f line(point, other_point);
       vector_map.lines.push_back(line);
-      break;
     }
   }
-  printf("Finished transforming point cloud map to vector map\n");
   return vector_map;
 }
 

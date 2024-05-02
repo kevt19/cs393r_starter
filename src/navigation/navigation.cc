@@ -525,7 +525,7 @@ namespace navigation
         max_score = score;
         result = p;
       }
-      printf("Curvature %f, Distance to goal %f, Clearance %f, Free path length %f, score %f\n", p.curvature, distance, p.clearance, p.free_path_length, score);
+      // printf("Curvature %f, Distance to goal %f, Clearance %f, Free path length %f, score %f\n", p.curvature, distance, p.clearance, p.free_path_length, score);
     }
     return result;
   }

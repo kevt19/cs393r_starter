@@ -71,7 +71,7 @@ using visualization::DrawParticle;
 DEFINE_string(laser_topic, "/scan", "Name of ROS topic for LIDAR data");
 DEFINE_string(odom_topic, "/odom", "Name of ROS topic for odometry data");
 DEFINE_string(loc_topic, "localization", "Name of ROS topic for localization");
-DEFINE_bool(publishPose, false, "Publish the pose of the robot");
+DEFINE_bool(publishPose, true, "Publish the pose of the robot");
 
 DECLARE_int32(v);
 
