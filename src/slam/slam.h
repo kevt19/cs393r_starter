@@ -63,9 +63,11 @@ class SLAM {
 
   // Get latest map.
   std::vector<Eigen::Vector2f> GetMap();
-  std::map<std::pair<int,int>, double> BuildLowResRasterMapFromHighRes(std::map<std::pair<int,int>, double> high_res_raster_map); 
-  std::map<std::pair<int,int>, double> BuildHighResRasterMapFromPoints(const std::vector<Eigen::Vector2d> &alignedPoints);
-  std::map<std::pair<int,int>, double> BuildHighResRasterMapFromMap(const VectorMap& map);
+  // std::map<std::pair<int,int>, double> BuildLowResRasterMapFromHighRes(std::map<std::pair<int,int>, double> high_res_raster_map); 
+  // std::map<std::pair<int,int>, double> BuildHighResRasterMapFromPoints(const std::vector<Eigen::Vector2d> &alignedPoints);
+  std::vector<double> BuildHighResRasterMapFromPoints(const std::vector<Eigen::Vector2d> &alignedPoints);
+  std::vector<double> BuildLowResRasterMapFromHighRes(const std::vector<Eigen::Vector2d> &alignedPoints); 
+  // std::map<std::pair<int,int>, double> BuildHighResRasterMapFromMap(const VectorMap& map);
   std::vector<Eigen::Vector2d> AlignPointCloud(const std::vector<Eigen::Vector2d>& point_cloud,
                                   const Eigen::Vector2d& optimized_loc,
                                   const double optimized_angle);
@@ -77,8 +79,8 @@ class SLAM {
                                    const double odom_angle,
                                    const Eigen::Vector2d& prev_loc,
                                    const double prev_angle,
-                                   std::map<std::pair<int,int>, double> low_res_raster_map,
-                                   std::map<std::pair<int,int>, double> high_res_raster_map);
+                                   std::vector<double>& low_res_raster_map,
+                                   std::vector<double>& high_res_raster_map);
   void ClearPreviousData();
   void SetMapPointCloud();
   void PoseGraphOptimization();
@@ -92,8 +94,8 @@ class SLAM {
   bool ready_to_csm_;
   double prev_odom_angle_;
   bool odom_initialized_;
-  std::vector<std::map<std::pair<int,int>, double>> high_res_raster_maps_;
-  std::vector<std::map<std::pair<int,int>, double>> low_res_raster_maps_;
+  std::vector<std::vector<double>> high_res_raster_maps_;
+  std::vector<std::vector<double>> low_res_raster_maps_;
   std::vector<std::vector<Eigen::Vector2d>> alignedPointsOverPoses_;
   std::vector<std::vector<Eigen::Vector2d>> pointClouds_;
   std::vector<Eigen::Vector3d> optimizedPoses_;
