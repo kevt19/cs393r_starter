@@ -30,6 +30,7 @@
 #include "shared/math/geometry.h"
 #include "shared/math/math_util.h"
 #include "shared/util/timer.h"
+#include "ros/ros.h"
 
 #include "simple_queue.h"
 #include "slam.h"
@@ -52,13 +53,14 @@ using std::string;
 using std::swap;
 using std::vector;
 using vector_map::VectorMap;
+using ros::Time;
 
 DEFINE_int32(laserInterval, 25, "Number of intervals between lasers.");
 DEFINE_int32(nNodesBeforeSLAM, 5, "Number of nodes to add to gtsam before calling optimize.");
 DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 DEFINE_int32(maxPointsInMap, 5000, "Maximum number of points in the map.");
-DEFINE_bool(run_pose_graph_optimization, true, "Run Pose Graph Optimization.");
+DEFINE_bool(run_pose_graph_optimization, false, "Run Pose Graph Optimization.");
 DEFINE_bool(groundTruthLocalization, false, "Use ground truth localization");
 
 DEFINE_double(slam_min_range, 0.01, "Minimum range to keep a laser reading.");
@@ -103,6 +105,7 @@ namespace slam
     ready_to_csm_ = false;
     location_initialized_ = false;
     usingGroundTruthLocalization_ = FLAGS_groundTruthLocalization;
+    lastTimeSLAMRan_ = GetWallTime();
 
     // constants
     raster_map_gaussian_sigma_constant = 2*pow(FLAGS_raster_map_gaussian_sigma, 2);
@@ -530,6 +533,8 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
 
     Eigen::Vector2d estimated_loc = current_loc_;
     double estimated_angle = current_angle_;
+
+    printf("Running CSM\n");
     
     std::vector<std::pair<Eigen::Vector3d, Eigen::MatrixXd>> all_optimized_pose_and_var = CorrelativeScanMatching(point_cloud, estimated_loc, estimated_angle);
     int num_new_optimized_poses = all_optimized_pose_and_var.size();
@@ -544,6 +549,8 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
     Eigen::Vector3d optimizedPoseAvg = optimizedPoseSum / num_new_optimized_poses;
     Pose2 optimizedPoseValue = Pose2(optimizedPoseAvg.x(), optimizedPoseAvg.y(), optimizedPoseAvg.z());
     initialGuesses_.insert(newNodeIdx, optimizedPoseValue);
+
+
 
     for (int i = 0; i < num_new_optimized_poses; i++) {
       Eigen::Vector3d optimized_pose = all_optimized_pose_and_var[i].first;
@@ -609,6 +616,8 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       SetMapPointCloud();
       ClearPreviousData();
     }
+
+    printf("Finished running CSM\n");
   }
 
   void SLAM::PoseGraphOptimization() {
@@ -671,10 +680,12 @@ void SLAM::UpdateLocation(const Eigen::Vector2d& odom_loc, const double odom_ang
   double delta_odom_dist = sqrt(pow(delta_odom_x, 2) + pow(delta_odom_y, 2));
   current_loc_ = odom_loc;
   current_angle_ = odom_angle;
-  if (delta_odom_dist < FLAGS_slam_dist_threshold && fabs(delta_odom_angle) < FLAGS_slam_angle_threshold) {
+  double currentTime = GetWallTime();
+  if (delta_odom_dist < FLAGS_slam_dist_threshold && fabs(delta_odom_angle) < FLAGS_slam_angle_threshold && (currentTime - lastTimeSLAMRan_) < 5.0) {
     return;
   }
   ready_to_csm_ = true;
+  lastTimeSLAMRan_ = currentTime;
   prev_loc_ = odom_loc;
   prev_angle_ = odom_angle;
 }

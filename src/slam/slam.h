@@ -26,6 +26,7 @@
 #include "eigen3/Eigen/Geometry"
 #include <map>
 #include "vector_map/vector_map.h"
+#include "ros/ros.h"
 
 #include <gtsam/geometry/Pose2.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
@@ -39,6 +40,7 @@ using namespace gtsam;
 
 
 using vector_map::VectorMap;
+using ros::Time;
 
 #ifndef SRC_SLAM_H_
 #define SRC_SLAM_H_
@@ -113,6 +115,7 @@ class SLAM {
   std::vector<Eigen::Vector2f> map_;
   Eigen::Vector3d latestOptimizedPose_;
   std::vector<int> nodeIndices_; // node indices for each pose
+  double lastTimeSLAMRan_;
 
   // constants
   double raster_map_gaussian_sigma_constant;
