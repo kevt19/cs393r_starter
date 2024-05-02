@@ -53,9 +53,9 @@ using std::swap;
 using std::vector;
 using vector_map::VectorMap;
 
-DEFINE_int32(laserInterval, 1, "Number of intervals between lasers.");
+DEFINE_int32(laserInterval, 25, "Number of intervals between lasers.");
 DEFINE_int32(nNodesBeforeSLAM, 5, "Number of nodes to add to gtsam before calling optimize.");
-DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
+DEFINE_double(slam_dist_threshold, 0.25, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 DEFINE_int32(maxPointsInMap, 5000, "Maximum number of points in the map.");
 DEFINE_bool(run_pose_graph_optimization, true, "Run Pose Graph Optimization.");
@@ -65,7 +65,7 @@ DEFINE_double(slam_min_range, 0.01, "Minimum range to keep a laser reading.");
 DEFINE_double(slam_max_range, 10.0, "Maximum range to keep a laser reading.");
 
 DEFINE_int32(slam_num_poses, 100, "Number of poses to keep for SLAM Pose Graph optimization.");
-DEFINE_int32(scan_match_timesteps, 1, "Number of previous poses / scans to optimize current pose for.");
+DEFINE_int32(scan_match_timesteps, 2, "Number of previous poses / scans to optimize current pose for.");
 
 DEFINE_double(raster_high_resolution, 0.1, "Resolution to rasterize the map to.");
 DEFINE_double(raster_low_resolution, 1.0, "Resolution to rasterize the map to.");
@@ -136,6 +136,7 @@ void SLAM::UpdateLocation(const Eigen::Vector2f& odom_loc, const float odom_angl
     noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Sigmas(Vector3(0.0, 0.0, 0.0));
     graph_.add(PriorFactor<Pose2>(1, Pose2(0, 0, 0), priorNoise));
     initialGuesses_.insert(1, Pose2(odom_loc_x, odom_loc_y, odom_angle_d));
+    printf("Initial guess %f, %f, %f\n", odom_loc_x, odom_loc_y, odom_angle_d);
     return;
   }
 
@@ -271,8 +272,20 @@ std::vector<std::pair<Eigen::Vector3d, Eigen::MatrixXd>> SLAM::CorrelativeScanMa
                                    const double odom_angle) 
 {
   std::vector <std::pair<Eigen::Vector3d, Eigen::MatrixXd>> bestPosesWithVariances;
-  int min_i = std::max(0, (int) optimizedPoses_.size() - FLAGS_scan_match_timesteps);
-  for (int i = optimizedPoses_.size() - 1; i >= min_i; i--)
+  // int min_i = std::max(0, (int) optimizedPoses_.size() - FLAGS_scan_match_timesteps);
+
+  // now let's figure out the prior poses
+  
+  int startIdx = optimizedPoses_.size() - FLAGS_scan_match_timesteps;
+  if (startIdx < 0) {
+    startIdx = 0;
+  }
+  int endIdx = optimizedPoses_.size() - (FLAGS_scan_match_timesteps * FLAGS_scan_match_timesteps);
+  if (endIdx < 0) {
+    endIdx = 0;
+  } 
+
+  for (int i = startIdx; i >= endIdx; i -= FLAGS_scan_match_timesteps)
   {
     Eigen::Vector2d prev_loc = Eigen::Vector2d(optimizedPoses_[i].x(), optimizedPoses_[i].y());
     double prev_angle = optimizedPoses_[i].z();
@@ -520,6 +533,7 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       alignedPointsOverPoses_.push_back(aligned_point_cloud);
       Eigen::MatrixXd initial_cov = Eigen::MatrixXd::Zero(3, 3);
       optimizedPosesVariances_.push_back(initial_cov);
+      nodeIndices_.push_back(1);
       ready_to_csm_ = false; 
       return;
     }
@@ -551,6 +565,17 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
     
     std::vector<std::pair<Eigen::Vector3d, Eigen::MatrixXd>> all_optimized_pose_and_var = CorrelativeScanMatching(point_cloud, estimated_loc, estimated_angle);
     int num_new_optimized_poses = all_optimized_pose_and_var.size();
+    int newNodeIdx = nNodesInGraph + 1;
+
+    // let's get the average optimized pose
+    Eigen::Vector3d optimizedPoseSum = Eigen::Vector3d(0.0, 0.0, 0.0);
+    for (int i = 0; i < num_new_optimized_poses; i++) {
+      Eigen::Vector3d optimized_pose = all_optimized_pose_and_var[i].first;
+      optimizedPoseSum += optimized_pose;
+    }
+    Eigen::Vector3d optimizedPoseAvg = optimizedPoseSum / num_new_optimized_poses;
+    Pose2 optimizedPoseValue = Pose2(optimizedPoseAvg.x(), optimizedPoseAvg.y(), optimizedPoseAvg.z());
+    initialGuesses_.insert(newNodeIdx, optimizedPoseValue);
 
     for (int i = 0; i < num_new_optimized_poses; i++) {
       Eigen::Vector3d optimized_pose = all_optimized_pose_and_var[i].first;
@@ -586,20 +611,25 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       // add to factor graph
       // printf("sTart\n");
       Eigen::Vector3d optimized_var_diag = optimized_var.diagonal();
-      Vector3 optimized_std_diag = Vector3(optimized_var_diag.x(), optimized_var_diag.y(), optimized_var_diag.z());
-      noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Sigmas(Vector3(0.0, 0.0, 0.0));
+      // Vector3 optimized_std_diag = Vector3(optimized_var_diag.x(), optimized_var_diag.y(), optimized_var_diag.z());
+      Vector3 optimized_std_diag = Vector3(optimized_var_diag.x() * 0.0, optimized_var_diag.y() * 0.0, optimized_var_diag.z() * 0.0);
       noiseModel::Diagonal::shared_ptr stdForOptimizedPose = noiseModel::Diagonal::Sigmas(optimized_std_diag);
-      Eigen::Vector3d priorPose = optimizedPoses_[num_scans - 1 - i];
+      num_scans = optimizedPoses_.size();
+      int otherPoseIdx = num_scans - FLAGS_scan_match_timesteps * (i + 1);
+      otherPoseIdx = std::max(otherPoseIdx, 0); // edge case of first pose
+      Eigen::Vector3d priorPose = optimizedPoses_[otherPoseIdx];
       // printf("fo\n");
       Eigen::Vector3d deltaPose = optimized_pose - priorPose;
+      printf("Delta pose: %f, %f, %f\n", deltaPose.x(), deltaPose.y(), deltaPose.z());
       Pose2 deltaPoseForGraph = Pose2(deltaPose.x(), deltaPose.y(), deltaPose.z());
-      Pose2 optimizedPoseForGraph = Pose2(optimized_pose.x(), optimized_pose.y(), optimized_pose.z());
+      // Pose2 optimizedPoseForGraph = Pose2(optimized_pose.x(), optimized_pose.y(), optimized_pose.z());
       // printf("before adding\n");
-      graph_.add(BetweenFactor<Pose2>(nNodesInGraph - i, nNodesInGraph + 1, deltaPoseForGraph, stdForOptimizedPose));
-      initialGuesses_.insert(nNodesInGraph + 1, optimizedPoseForGraph);
+      int otherNodeIdx = nodeIndices_[otherPoseIdx];
+      graph_.add(BetweenFactor<Pose2>(otherNodeIdx, newNodeIdx, deltaPoseForGraph, stdForOptimizedPose));
+      nodeIndices_.push_back(newNodeIdx);
       // printf("after inserting\n");
-      nNodesInGraph += 1;
     }
+    nNodesInGraph += 1; // not the same as num of edges in graph
 
     if (nNodesInGraph > 10 && nNodesInGraph % FLAGS_nNodesBeforeSLAM == 0) {
       if (FLAGS_run_pose_graph_optimization) {
@@ -615,11 +645,13 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
     LevenbergMarquardtOptimizer optimizer(graph_, initialGuesses_);
     // printf("before optimizing\n");
     Values result = optimizer.optimize();
-    for (int i = nNodesInGraph - 1; i >= 0; i--)
+    int num_scans = optimizedPoses_.size();
+    for (int i = 0; i < num_scans; i++)
     {
-      double x = result.at<Pose2>(i + 1).x();
-      double y = result.at<Pose2>(i + 1).y();
-      double theta = result.at<Pose2>(i + 1).theta();
+      int nodeIdx = nodeIndices_[i];
+      double x = result.at<Pose2>(nodeIdx).x();
+      double y = result.at<Pose2>(nodeIdx).y();
+      double theta = result.at<Pose2>(nodeIdx).theta();
       // printf("initial guess %f, %f", initialGuesses_.at<Pose2>(i).x(), initialGuesses_.at<Pose2>(i).y());
       // printf("optimized loc %f, %f", optimizedPoses_[i].x(), optimizedPoses_[i].y());
       // printf("updated optimized loc %f, %f", x, y);
@@ -630,9 +662,12 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
       // update our vector
       optimizedPoses_[i] = updatedOptimizedPose;
       // update aligned point clouds
+
+      // printf("Old optimized pose %f, %f, %f\n", optimizedPoses_[i].x(), optimizedPoses_[i].y(), optimizedPoses_[i].z());
+      // printf("New optimized pose %f, %f, %f\n", updatedOptimizedPose.x(), updatedOptimizedPose.y(), updatedOptimizedPose.z());
       
       std::vector<Eigen::Vector2d> updatedAlignedPointCloud = AlignPointCloud(pointClouds_[i], updatedOptimizedLoc, theta);
-      alignedPointsOverPoses_[i] = updatedAlignedPointCloud; 
+      alignedPointsOverPoses_[i] = alignedPointsOverPoses_[i]; 
     }
 
     // add last optimizedPose to current loc
@@ -678,17 +713,33 @@ void SLAM::ObserveOdometry(const Vector2d& odom_loc, const double odom_angle) {
 }
 
 void SLAM::ClearPreviousData() {
-  // clear all data
-  optimizedPoses_.clear();
-  pointClouds_.clear();
-  alignedPointsOverPoses_.clear();
-  high_res_raster_maps_.clear();
-  low_res_raster_maps_.clear();
-  optimizedPosesVariances_.clear();
+  // keep last value
+  if (optimizedPoses_.size() > 0) {
+    optimizedPoses_.erase(optimizedPoses_.begin(), optimizedPoses_.end() - 1);
+    odometryPoses_.erase(odometryPoses_.begin(), odometryPoses_.end() - 1);
+    pointClouds_.erase(pointClouds_.begin(), pointClouds_.end() - 1);
+    alignedPointsOverPoses_.erase(alignedPointsOverPoses_.begin(), alignedPointsOverPoses_.end() - 1);
+    high_res_raster_maps_.erase(high_res_raster_maps_.begin(), high_res_raster_maps_.end() - 1);
+    low_res_raster_maps_.erase(low_res_raster_maps_.begin(), low_res_raster_maps_.end() - 1);
+    optimizedPosesVariances_.erase(optimizedPosesVariances_.begin(), optimizedPosesVariances_.end() - 1);
+    nodeIndices_.erase(nodeIndices_.begin(), nodeIndices_.end() - 1);
+  }
+
   graph_ = NonlinearFactorGraph();
   initialGuesses_ = Values();
   nNodesInGraph = 1;
-  location_initialized_ = false;
+
+  Eigen::Vector3d optimized_pose = optimizedPoses_[0];
+  // Vector3 optimized_std_diag = Vector3(optimized_var_diag.x(), optimized_var_diag.y(), optimized_var_diag.z());
+  Eigen::MatrixXd optimized_var = optimizedPosesVariances_[0];
+  Eigen::Vector3d optimized_var_diag = optimized_var.diagonal();
+  Eigen::Vector3d optimized_std_diag = Vector3(optimized_var_diag.x() * 0.0, optimized_var_diag.y() * 0.0, optimized_var_diag.z() * 0.0);
+
+  // add prior factor
+  noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Sigmas(optimized_std_diag);
+  nodeIndices_[0] = 1;
+  graph_.add(PriorFactor<Pose2>(1, Pose2(0, 0, 0), priorNoise));
+  initialGuesses_.insert(1, Pose2(optimized_pose.x(), optimized_pose.y(), optimized_pose.z()));
 }
 
 void SLAM::SetMapPointCloud() {

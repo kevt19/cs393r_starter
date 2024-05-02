@@ -109,6 +109,7 @@ class SLAM {
   Values initialGuesses_;
   std::vector<Eigen::Vector2f> map_;
   Eigen::Vector3d latestOptimizedPose_;
+  std::vector<int> nodeIndices_; // node indices for each pose
 
   // constants
   double raster_map_gaussian_sigma_constant;
