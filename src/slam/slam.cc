@@ -60,7 +60,7 @@ DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 DEFINE_int32(maxPointsInMap, 5000, "Maximum number of points in the map.");
 DEFINE_bool(run_pose_graph_optimization, true, "Run Pose Graph Optimization.");
-DEFINE_bool(groundTruthLocalization, true, "Use ground truth localization");
+DEFINE_bool(groundTruthLocalization, false, "Use ground truth localization");
 
 DEFINE_double(slam_min_range, 0.01, "Minimum range to keep a laser reading.");
 DEFINE_double(slam_max_range, 10.0, "Maximum range to keep a laser reading.");
@@ -486,7 +486,6 @@ std::pair<Eigen::Vector3d, Eigen::MatrixXd> SLAM::SingleCorrelativeScanMatching(
     // if this is the first scan, let's save it and return
     int num_scans = alignedPointsOverPoses_.size();
     if (ready_to_csm_ && num_scans == 0) {
-      printf("num scans: %d\n", num_scans);
       double prev_loc_x = prev_loc_.x();
       double prev_loc_y = prev_loc_.y();
       double prec_angle = prev_angle_;

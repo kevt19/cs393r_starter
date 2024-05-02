@@ -43,6 +43,16 @@ using vector_map::VectorMap;
 #ifndef SRC_SLAM_H_
 #define SRC_SLAM_H_
 
+string GetMapFileFromName(const string &map)
+{
+  string maps_dir_ = ros::package::getPath("amrl_maps");
+  string outputFilepath = maps_dir_ + "/" + map + "/" + map + ".vectormap.txt";
+  // Create folder if it does not exist
+  string command = "mkdir -p " + maps_dir_ + "/" + map;
+  system(command.c_str());
+  return outputFilepath;
+}
+
 namespace slam {
 
 class SLAM {
@@ -90,8 +100,7 @@ class SLAM {
   // Get latest robot pose.
   void GetPose(Eigen::Vector2d* loc, double* angle) const;
   bool usingGroundTruthLocalization_;
-  std::string mapFilepath_ = "slam.vectormap.txt";
-
+  std::string mapFilepath_ = GetMapFileFromName("slam");
 
  private:
   // Previous odometry-reported locations.
