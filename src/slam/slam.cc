@@ -54,12 +54,12 @@ using std::vector;
 using vector_map::VectorMap;
 
 DEFINE_int32(laserInterval, 25, "Number of intervals between lasers.");
-DEFINE_int32(nNodesBeforeSLAM, 1, "Number of nodes to add to gtsam before calling optimize.");
-DEFINE_double(slam_dist_threshold, 0.25, "Position threshold for SLAM.");
+DEFINE_int32(nNodesBeforeSLAM, 5, "Number of nodes to add to gtsam before calling optimize.");
+DEFINE_double(slam_dist_threshold, 0.5, "Position threshold for SLAM.");
 DEFINE_double(slam_angle_threshold, 30.0, "Angle threshold for SLAM.");
 DEFINE_int32(maxPointsInMap, 5000, "Maximum number of points in the map.");
-DEFINE_bool(run_pose_graph_optimization, false, "Run Pose Graph Optimization.");
-DEFINE_bool(groundTruthLocalization, true, "Use ground truth localization");
+DEFINE_bool(run_pose_graph_optimization, true, "Run Pose Graph Optimization.");
+DEFINE_bool(groundTruthLocalization, false, "Use ground truth localization");
 
 DEFINE_double(slam_min_range, 0.01, "Minimum range to keep a laser reading.");
 DEFINE_double(slam_max_range, 10.0, "Maximum range to keep a laser reading.");
@@ -73,12 +73,12 @@ DEFINE_double(raster_map_gaussian_sigma, 1.0, "Sigma for rasterized map.");
 DEFINE_double(raster_min_log_prob, -3.0, "Minimum log probability for map point."); // -3.0 is equivalent to 0.001 p
 DEFINE_double(maxMapDistance, 0.5, "Maximum distance to consider for log probabilities for map point.");
 
-// DEFINE_double(sigma_x, 0.05, "Sigma for x in motion model.");
-// DEFINE_double(sigma_y, 0.05, "Sigma for y in motion model.");
-// DEFINE_double(sigma_theta, 0.01, "Sigma for theta in motion model.");
-DEFINE_double(sigma_x, 0.2, "Sigma for x in motion model.");
-DEFINE_double(sigma_y, 0.2, "Sigma for y in motion model.");
-DEFINE_double(sigma_theta, 0.05, "Sigma for theta in motion model.");
+DEFINE_double(sigma_x, 0.05, "Sigma for x in motion model.");
+DEFINE_double(sigma_y, 0.05, "Sigma for y in motion model.");
+DEFINE_double(sigma_theta, 0.01, "Sigma for theta in motion model.");
+// DEFINE_double(sigma_x, 0.2, "Sigma for x in motion model.");
+// DEFINE_double(sigma_y, 0.2, "Sigma for y in motion model.");
+// DEFINE_double(sigma_theta, 0.05, "Sigma for theta in motion model.");
 
 DEFINE_double(VoxelDeltaAngleMin, -15.0, "Minimum size to consider for angle away.");
 DEFINE_double(VoxelDeltaAngleMax, 15.0, "Maximum size to consider for angle away.");
