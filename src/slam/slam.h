@@ -35,23 +35,20 @@
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/slam/PriorFactor.h>
 
-using namespace gtsam;
+#include "ros/ros.h"
+#include "ros/package.h"
 
+using namespace gtsam;
+// using namespace ros_helpers;
 
 using vector_map::VectorMap;
 
 #ifndef SRC_SLAM_H_
 #define SRC_SLAM_H_
 
-string GetMapFileFromName(const string &map)
-{
-  string maps_dir_ = ros::package::getPath("amrl_maps");
-  string outputFilepath = maps_dir_ + "/" + map + "/" + map + ".vectormap.txt";
-  // Create folder if it does not exist
-  string command = "mkdir -p " + maps_dir_ + "/" + map;
-  system(command.c_str());
-  return outputFilepath;
-}
+namespace ros {
+  class NodeHandle;
+}  // namespace ros
 
 namespace slam {
 
@@ -70,6 +67,21 @@ class SLAM {
   // Observe new odometry-reported location.
   void ObserveOdometry(const Eigen::Vector2d& odom_loc,
                        const double odom_angle);
+
+
+  std::string GetMapFileFromName(const std::string &map)
+  {
+    std::string maps_dir_ = ros::package::getPath("amrl_maps");
+    std::string outputFilepath = maps_dir_ + "/" + map + "/" + map + ".vectormap.txt";
+    // Create folder if it does not exist
+    std::string command = "mkdir -p " + maps_dir_ + "/" + map;
+    int returnVal = system(command.c_str());
+    if (returnVal != 0)
+    {
+      ROS_ERROR("Error creating directory for map file");
+    }
+    return outputFilepath;
+  }
 
   // Get latest map.
   std::vector<Eigen::Vector2f> GetMap();

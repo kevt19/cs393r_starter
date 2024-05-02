@@ -725,6 +725,9 @@ vector<Vector2f> SLAM::GetMap() {
 void SLAM::FormatAndSaveMap() {
   // Save the map as a vector map
   vector_map::VectorMap vector_map = TransformPointCloudMapToVectorMap();
+  // get number of lines
+  int num_lines = vector_map.lines.size();
+  printf("Saving map with %d lines\n", num_lines);
   vector_map.Save(mapFilepath_);
 }
 
